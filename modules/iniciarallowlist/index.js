@@ -18,7 +18,6 @@ function isSnowflake(value) {
 function resolveConfig(config) {
   return {
     panelChannelId: isSnowflake(config.panelChannelId) ? config.panelChannelId : null,
-    title: config.title || "Iniciar Allowlist",
     description: config.description || "Bem-vindo a WAVE. Para continuar sua estadia em nossa cidade, voce precisa liberar seu passaporte pela allowlist.",
     footerText: config.footerText || "A allowlist e feita pelo nosso site e pode ser aprovada automaticamente quando voce acertar a maioria das perguntas sobre as regras da cidade.",
     buttonLabel: config.buttonLabel || "Allowlist",
@@ -30,10 +29,7 @@ function resolveConfig(config) {
 
 function buildAllowlistPanel(config) {
   const container = new ContainerBuilder()
-    .setAccentColor(config.accentColor)
-    .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`## ${config.title}`)
-    );
+    .setAccentColor(config.accentColor);
 
   if (config.bannerUrl) {
     container.addMediaGalleryComponents(
