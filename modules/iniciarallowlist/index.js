@@ -4,11 +4,11 @@ const {
   ButtonStyle,
   ContainerBuilder,
   Events,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
   MessageFlags,
-  SectionBuilder,
   SeparatorBuilder,
-  TextDisplayBuilder,
-  ThumbnailBuilder
+  TextDisplayBuilder
 } = require("discord.js");
 
 function isSnowflake(value) {
@@ -19,32 +19,37 @@ function resolveConfig(config) {
   return {
     panelChannelId: isSnowflake(config.panelChannelId) ? config.panelChannelId : null,
     title: config.title || "Iniciar Allowlist",
-    description: config.description || "Clique no botao abaixo para iniciar sua allowlist e entrar na cidade.",
+    description: config.description || "Bem-vindo a WAVE. Para continuar sua estadia em nossa cidade, voce precisa liberar seu passaporte pela allowlist.",
+    footerText: config.footerText || "A allowlist e feita pelo nosso site e pode ser aprovada automaticamente quando voce acertar a maioria das perguntas sobre as regras da cidade.",
     buttonLabel: config.buttonLabel || "Allowlist",
     allowlistUrl: config.allowlistUrl || "http://localhost:3000/allowlistw",
-    thumbnailUrl: config.thumbnailUrl || "https://cdn.discordapp.com/embed/avatars/0.png",
-    accentColor: Number.isInteger(config.accentColor) ? config.accentColor : 0x2ecc71
+    bannerUrl: config.bannerUrl || null,
+    accentColor: Number.isInteger(config.accentColor) ? config.accentColor : 0xff8c1a
   };
 }
 
 function buildAllowlistPanel(config) {
-  return new ContainerBuilder()
+  const container = new ContainerBuilder()
     .setAccentColor(config.accentColor)
-    .addSectionComponents(
-      new SectionBuilder()
-        .addTextDisplayComponents(
-          new TextDisplayBuilder().setContent(`## ${config.title}`),
-          new TextDisplayBuilder().setContent(config.description)
-        )
-        .setThumbnailAccessory(
-          new ThumbnailBuilder()
-            .setURL(config.thumbnailUrl)
-            .setDescription("Allowlist")
-        )
-    )
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`## ${config.title}`)
+    );
+
+  if (config.bannerUrl) {
+    container.addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder()
+          .setURL(config.bannerUrl)
+          .setDescription("Banner da allowlist WAVE")
+      )
+    );
+  }
+
+  return container
     .addSeparatorComponents(new SeparatorBuilder())
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent("Ao finalizar, aguarde a avaliacao da equipe responsavel.")
+      new TextDisplayBuilder().setContent(config.description),
+      new TextDisplayBuilder().setContent(config.footerText)
     )
     .addActionRowComponents(
       new ActionRowBuilder().addComponents(

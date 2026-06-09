@@ -1,9 +1,10 @@
 {
   "panelChannelId": "1513563252116946996",
-  "title": "Iniciar Allowlist",
-  "description": "Clique no botao abaixo para iniciar sua allowlist e entrar na cidade.",
+  "title": "Bem-vindo a WAVE",
+  "description": "Para continuar sua estadia em nossa cidade, voce precisa liberar seu passaporte pela allowlist. O processo e rapido: leia com atencao as regras, responda as perguntas e finalize pelo nosso site.",
+  "footerText": "A allowlist e autoaprovada quando voce acerta a maioria das perguntas sobre as regras da cidade.",
   "buttonLabel": "Allowlist",
   "allowlistUrl": "http://localhost:3000/allowlistw",
-  "thumbnailUrl": "https://cdn.discordapp.com/embed/avatars/0.png",
-  "accentColor": 3066993
+  "bannerUrl": "https://media.discordapp.net/attachments/1513993233812820162/1513993285239181432/allowlist.png",
+  "accentColor": 16747546
 }
