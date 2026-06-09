@@ -1,18 +1,18 @@
 {
-  "panelChannelId": "1513563252116946996",
-  "cityName": "EUFORIA ROLEPLAY",
+  "panelChannelId": "1513565299683754014",
+  "cityName": "WAVE™ ROLEPLAY",
   "statusLabel": "ONLINE",
   "ipLabel": "IP FiveM",
-  "serverIp": "connect euforiarp.gg",
+  "serverIp": "connect wave.gg",
   "updateText": "Atualizando a cada 1 minuto",
   "timezone": "America/Sao_Paulo",
   "bannerUrl": "https://media.discordapp.net/attachments/1513993233812820162/1513995484820148244/allowlist.png",
-  "thumbnailUrl": "https://media.discordapp.net/attachments/1513993233812820162/1513995484820148244/allowlist.png",
+  "thumbnailUrl": "https://media.discordapp.net/attachments/1513993233812820162/1514005804926243017/188.png",
   "accentColor": 2060287,
   "buttons": [
     {
       "label": "\ud83d\udd17 Conectar no Servidor",
-      "url": "https://cfx.re/join/euforiarp.gg"
+      "url": "https://cfx.re/join/wave"
     },
     {
       "label": "\ud83d\udcf7 Instagram",
@@ -20,7 +20,7 @@
     },
     {
       "label": "\ud83d\uded2 Loja",
-      "url": "https://euforiarp.gg/loja"
+      "url": "https://waverp.gg/loja"
     }
   ]
 }
