@@ -1,6 +1,8 @@
 const {
   ContainerBuilder,
   Events,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
   MessageFlags,
   SectionBuilder,
   SeparatorBuilder,
@@ -12,7 +14,7 @@ function formatDate(value) {
   return value ? `<t:${Math.floor(value.getTime() / 1000)}:F>` : "Nao disponivel";
 }
 
-function buildLogCard({ accentColor, heading, summary, details, member }) {
+function buildLogCard({ accentColor, heading, summary, details, member, bannerUrl }) {
   const avatarUrl = member.user.displayAvatarURL({ size: 256 });
   const container = new ContainerBuilder().setAccentColor(accentColor);
 
@@ -31,10 +33,26 @@ function buildLogCard({ accentColor, heading, summary, details, member }) {
 
   container
     .addSectionComponents(headerSection)
-    .addSeparatorComponents(new SeparatorBuilder())
-    .addTextDisplayComponents(detailsBlock);
+    .addSeparatorComponents(new SeparatorBuilder());
+
+  if (bannerUrl) {
+    container.addMediaGalleryComponents(
+      new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder()
+          .setURL(bannerUrl)
+      )
+    );
+  }
+
+  container.addTextDisplayComponents(detailsBlock);
 
   return container;
+}
+
+function resolveBannerUrl(config) {
+  return typeof config.bannerUrl === "string" && config.bannerUrl.trim()
+    ? config.bannerUrl.trim()
+    : null;
 }
 
 function resolveChannelId(config, type) {
@@ -67,6 +85,8 @@ async function sendLog(client, guild, component, config, type) {
 }
 
 async function register({ client, config }) {
+  const bannerUrl = resolveBannerUrl(config);
+
   client.on(Events.GuildMemberAdd, async (member) => {
     const component = buildLogCard({
       accentColor: 0x57f287,
@@ -78,7 +98,8 @@ async function register({ client, config }) {
         `**Conta criada em:** ${formatDate(member.user.createdAt)}`,
         `**Entrou em:** ${formatDate(new Date())}`
       ],
-      member
+      member,
+      bannerUrl
     });
 
     await sendLog(client, member.guild, component, config, "join");
@@ -95,7 +116,8 @@ async function register({ client, config }) {
         `**Conta criada em:** ${formatDate(member.user.createdAt)}`,
         `**Saiu em:** ${formatDate(new Date())}`
       ],
-      member
+      member,
+      bannerUrl
     });
 
     await sendLog(client, member.guild, component, config, "leave");

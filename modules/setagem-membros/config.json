@@ -1,0 +1,30 @@
+{
+  "panelChannelId": "1513991982182170876",
+  "reviewChannelId": "1513992002994176020",
+  "reviewerRoleId": "1513563951361691758",
+  "accentColor": 5793266,
+  "approveColor": 5763719,
+  "denyColor": 15548997,
+  "bannerUrl": "",
+  "roles": [
+    {
+      "roleId": "1513563287013556366",
+      "grantRoleIds": [
+        "1513563933619916983",
+        "1513563951361691758"
+      ],
+      "label": "Membro",
+      "shortLabel": "MBR",
+      "description": "Cargo base do servidor"
+    },
+    {
+      "roleId": "1513563933619916983",
+      "grantRoleIds": [
+        "1513563933619916983"
+      ],
+      "label": "Remador",
+      "shortLabel": "RMD",
+      "description": "Cargo base do servidor"
+    }
+  ]
+}

@@ -32,6 +32,44 @@ function isConsumedInteractionError(error) {
   return error?.code === 10062 || error?.code === 40060;
 }
 
+async function deferEphemeralReply(interaction) {
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    return true;
+  } catch (error) {
+    if (isConsumedInteractionError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+async function deferInteractionUpdate(interaction) {
+  try {
+    await interaction.deferUpdate();
+    return true;
+  } catch (error) {
+    if (isConsumedInteractionError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+async function sendEphemeralResponse(interaction, payload) {
+  if (interaction.deferred) {
+    return interaction.editReply(payload).catch(() => {});
+  }
+
+  if (interaction.replied) {
+    return interaction.followUp({ ...payload, flags: MessageFlags.Ephemeral }).catch(() => {});
+  }
+
+  return interaction.reply({ ...payload, flags: MessageFlags.Ephemeral }).catch(() => {});
+}
+
 function isSnowflake(value) {
   return typeof value === "string" && /^\d{17,20}$/.test(value);
 }
@@ -357,21 +395,33 @@ function truncate(value, maxLength) {
   return `${value.slice(0, maxLength - 3)}...`;
 }
 
+function buildTranscriptLinkButton(url) {
+  if (!url) {
+    return null;
+  }
+
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setStyle(ButtonStyle.Link)
+      .setURL(url)
+      .setEmoji("🔒")
+      .setLabel("Acessar Historico")
+  );
+}
+
 function buildTranscriptEmbed({ transcript, password, url, includePassword }) {
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle("Historico de ticket gerado")
-    .setDescription("O historico desta conversa foi salvo e pode ser acessado pelo link abaixo.")
+    .setDescription("O historico desta conversa foi salvo e pode ser acessado pelo botao abaixo.")
     .addFields(
-      { name: "Servidor", value: truncate(transcript.guildName || transcript.guildId, 1024), inline: true },
       { name: "Ticket", value: `#${truncate(transcript.channelName, 1000)}`, inline: true },
-      { name: "Mensagens", value: String(transcript.messages.length), inline: true },
-      { name: "Link", value: url || "Defina TICKET_TRANSCRIPT_BASE_URL para gerar a URL.", inline: false }
+      { name: "Mensagens", value: String(transcript.messages.length), inline: true }
     )
     .setTimestamp(new Date(transcript.closedAt));
 
   if (includePassword) {
-    embed.addFields({ name: "Senha", value: `\`${password}\``, inline: false });
+    embed.addFields({ name: "Senha", value: `\`\`\`\n${password}\n\`\`\``, inline: false });
   }
 
   if (transcript.closedBy?.avatarUrl) {
@@ -388,6 +438,7 @@ async function notifyTranscriptMembers(client, guild, transcript, password, url)
     url,
     includePassword: true
   });
+  const linkButton = buildTranscriptLinkButton(url);
 
   const uniqueIds = [...new Set(transcript.participants)]
     .filter((id) => id && id !== client.user.id);
@@ -395,7 +446,10 @@ async function notifyTranscriptMembers(client, guild, transcript, password, url)
   const results = await Promise.allSettled(
     uniqueIds.map(async (userId) => {
       const user = await client.users.fetch(userId);
-      await user.send({ embeds: [embed] });
+      await user.send({
+        embeds: [embed],
+        components: linkButton ? [linkButton] : []
+      });
       return userId;
     })
   );
@@ -419,14 +473,10 @@ async function findOpenTicket(guild, userId, config) {
 }
 
 async function createTicket(interaction, config, ticketType) {
-  try {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  } catch (error) {
-    if (isConsumedInteractionError(error)) {
-      return;
-    }
+  const deferred = await deferEphemeralReply(interaction);
 
-    throw error;
+  if (!deferred) {
+    return;
   }
 
   const existingTicket = await findOpenTicket(interaction.guild, interaction.user.id, config);
@@ -499,29 +549,23 @@ async function closeTicket(interaction, client, config) {
   const channel = interaction.channel;
 
   if (!isTicketChannel(channel)) {
-    await interaction.reply({
-      content: "Este botao so pode ser usado em um canal de ticket.",
-      flags: MessageFlags.Ephemeral
+    await sendEphemeralResponse(interaction, {
+      content: "Este botao so pode ser usado em um canal de ticket."
     });
     return;
   }
 
   if (!canCloseTicket(interaction, config)) {
-    await interaction.reply({
-      content: "Apenas o criador do ticket ou a equipe podem fechar este atendimento.",
-      flags: MessageFlags.Ephemeral
+    await sendEphemeralResponse(interaction, {
+      content: "Apenas o criador do ticket ou a equipe podem fechar este atendimento."
     });
     return;
   }
 
-  try {
-    await interaction.deferUpdate();
-  } catch (error) {
-    if (isConsumedInteractionError(error)) {
-      return;
-    }
+  const deferred = await deferInteractionUpdate(interaction);
 
-    throw error;
+  if (!deferred) {
+    return;
   }
 
   if (closingTicketIds.has(channel.id)) {
@@ -552,7 +596,8 @@ async function closeTicket(interaction, client, config) {
           url: access.url,
           includePassword: true
         })
-      ]
+      ],
+      components: access.url ? [buildTranscriptLinkButton(access.url)] : []
     });
 
     dmStats = await notifyTranscriptMembers(client, interaction.guild, transcript, access.password, access.url);
@@ -583,41 +628,49 @@ async function closeTicket(interaction, client, config) {
 }
 
 async function openStaffMenu(interaction, config) {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+  const deferred = await deferEphemeralReply(interaction);
+
+  if (!deferred) {
+    return;
+  }
 
   if (!isTicketChannel(interaction.channel)) {
-    await interaction.editReply({
-      content: "Este controle so pode ser usado em um canal de ticket.",
+    await sendEphemeralResponse(interaction, {
+      content: "Este controle so pode ser usado em um canal de ticket."
     });
     return;
   }
 
   if (!isStaffMember(interaction, config)) {
-    await interaction.editReply({
-      content: "Apenas a equipe pode usar o Menu Staff.",
+    await sendEphemeralResponse(interaction, {
+      content: "Apenas a equipe pode usar o Menu Staff."
     });
     return;
   }
 
-  await interaction.editReply({
+  await sendEphemeralResponse(interaction, {
     content: "Menu Staff deste ticket.",
     components: buildStaffMenuComponents(config)
   });
 }
 
 async function promptMemberSelection(interaction, config, mode) {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
+  const deferred = await deferEphemeralReply(interaction);
+
+  if (!deferred) {
+    return;
+  }
 
   if (!isTicketChannel(interaction.channel)) {
-    await interaction.editReply({
-      content: "Este controle so pode ser usado em um canal de ticket.",
+    await sendEphemeralResponse(interaction, {
+      content: "Este controle so pode ser usado em um canal de ticket."
     });
     return;
   }
 
   if (!canManageTicketMembers(interaction, config)) {
-    await interaction.editReply({
-      content: "Apenas o criador do ticket ou a equipe podem gerenciar membros.",
+    await sendEphemeralResponse(interaction, {
+      content: "Apenas o criador do ticket ou a equipe podem gerenciar membros."
     });
     return;
   }
@@ -627,7 +680,7 @@ async function promptMemberSelection(interaction, config, mode) {
     ? "Selecione quem deve entrar no ticket"
     : "Selecione quem deve sair do ticket";
 
-  await interaction.editReply({
+  await sendEphemeralResponse(interaction, {
     content: mode === "add"
       ? "Escolha um usuario para adicionar a este ticket."
       : "Escolha um usuario para remover deste ticket.",
@@ -668,7 +721,11 @@ async function leaveTicket(interaction, client, config) {
 }
 
 async function addMemberToTicket(interaction, client, config) {
-  await interaction.deferUpdate().catch(() => {});
+  const deferred = await deferInteractionUpdate(interaction);
+
+  if (!deferred) {
+    return;
+  }
 
   if (!isTicketChannel(interaction.channel)) {
     return;
@@ -710,7 +767,11 @@ async function addMemberToTicket(interaction, client, config) {
 }
 
 async function removeMemberFromTicket(interaction, client, config) {
-  await interaction.deferUpdate().catch(() => {});
+  const deferred = await deferInteractionUpdate(interaction);
+
+  if (!deferred) {
+    return;
+  }
 
   if (!isTicketChannel(interaction.channel)) {
     return;
@@ -740,8 +801,6 @@ async function removeMemberFromTicket(interaction, client, config) {
       ? `${member} foi removido(a) do ticket por ${interaction.user}.`
       : `Um usuario foi removido do ticket por ${interaction.user}.`
   }).catch(() => {});
-
-  await interaction.deferUpdate().catch(() => {});
 
   await sendTicketLog(
     client,
