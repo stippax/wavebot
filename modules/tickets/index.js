@@ -4,6 +4,7 @@ const {
   ButtonStyle,
   ChannelType,
   ContainerBuilder,
+  EmbedBuilder,
   Events,
   MessageFlags,
   PermissionFlagsBits,
@@ -14,6 +15,7 @@ const {
   ThumbnailBuilder,
   UserSelectMenuBuilder
 } = require("discord.js");
+const { buildTranscript, saveTranscript, getTranscriptConfigurationIssues } = require("./transcripts");
 
 const TICKET_TYPE_SELECT_ID = "tickets:type-select";
 const CLOSE_TICKET_BUTTON_ID = "tickets:close";
@@ -216,7 +218,8 @@ function getTicketMetadata(channel) {
   const parts = channel.topic.slice(TICKET_TOPIC_PREFIX.length).split("|");
   return {
     ownerId: parts[0] || null,
-    ticketType: parts[1] || null
+    ticketType: parts[1] || null,
+    createdAt: Number(parts[2]) || null
   };
 }
 
@@ -325,7 +328,7 @@ async function ensurePanel(client, config) {
   await channel.send(payload);
 }
 
-async function sendTicketLog(client, guild, config, content) {
+async function sendTicketLog(client, guild, config, payload) {
   if (!config.ticketLogChannelId) {
     return;
   }
@@ -336,7 +339,67 @@ async function sendTicketLog(client, guild, config, content) {
     return;
   }
 
-  await channel.send({ content }).catch(() => {});
+  const messagePayload = typeof payload === "string" ? { content: payload } : payload;
+
+  await channel.send(messagePayload).catch(() => {});
+}
+
+function truncate(value, maxLength) {
+  if (!value || value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength - 3)}...`;
+}
+
+function buildTranscriptEmbed({ transcript, password, url, includePassword }) {
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle("Historico de ticket gerado")
+    .setDescription("O historico desta conversa foi salvo e pode ser acessado pelo link abaixo.")
+    .addFields(
+      { name: "Servidor", value: truncate(transcript.guildName || transcript.guildId, 1024), inline: true },
+      { name: "Ticket", value: `#${truncate(transcript.channelName, 1000)}`, inline: true },
+      { name: "Mensagens", value: String(transcript.messages.length), inline: true },
+      { name: "Link", value: url || "Defina TICKET_TRANSCRIPT_BASE_URL para gerar a URL.", inline: false }
+    )
+    .setTimestamp(new Date(transcript.closedAt));
+
+  if (includePassword) {
+    embed.addFields({ name: "Senha", value: `\`${password}\``, inline: false });
+  }
+
+  if (transcript.closedBy?.avatarUrl) {
+    embed.setThumbnail(transcript.closedBy.avatarUrl);
+  }
+
+  return embed;
+}
+
+async function notifyTranscriptMembers(client, guild, transcript, password, url) {
+  const embed = buildTranscriptEmbed({
+    transcript,
+    password,
+    url,
+    includePassword: true
+  });
+
+  const uniqueIds = [...new Set(transcript.participants)]
+    .filter((id) => id && id !== client.user.id);
+
+  const results = await Promise.allSettled(
+    uniqueIds.map(async (userId) => {
+      const user = await client.users.fetch(userId);
+      await user.send({ embeds: [embed] });
+      return userId;
+    })
+  );
+
+  return {
+    total: uniqueIds.length,
+    sent: results.filter((result) => result.status === "fulfilled").length,
+    failed: results.filter((result) => result.status === "rejected").length
+  };
 }
 
 async function findOpenTicket(guild, userId, config) {
@@ -419,7 +482,7 @@ async function createTicket(interaction, config, ticketType) {
   });
 }
 
-async function closeTicket(interaction, config) {
+async function closeTicket(interaction, client, config) {
   const channel = interaction.channel;
 
   if (!isTicketChannel(channel)) {
@@ -438,8 +501,43 @@ async function closeTicket(interaction, config) {
     return;
   }
 
-  await interaction.reply({
-    content: "Ticket fechado. Este canal sera apagado em 5 segundos."
+  await interaction.deferReply();
+
+  let transcript;
+  let access;
+  let dmStats = null;
+
+  try {
+    transcript = await buildTranscript(channel, getTicketMetadata(channel), interaction.user);
+    access = await saveTranscript(config, transcript);
+
+    await sendTicketLog(client, interaction.guild, config, {
+      embeds: [
+        buildTranscriptEmbed({
+          transcript,
+          password: access.password,
+          url: access.url,
+          includePassword: true
+        })
+      ]
+    });
+
+    dmStats = await notifyTranscriptMembers(client, interaction.guild, transcript, access.password, access.url);
+  } catch (error) {
+    console.error("[tickets] Falha ao gerar historico do ticket.", error);
+
+    await interaction.editReply({
+      content: "Nao foi possivel salvar o historico deste ticket. O canal nao foi apagado."
+    });
+    return;
+  }
+
+  await interaction.editReply({
+    content: [
+      "Ticket fechado. O historico foi salvo e este canal sera apagado em 5 segundos.",
+      access.url ? `Link: ${access.url}` : null,
+      dmStats ? `DMs enviadas: ${dmStats.sent}/${dmStats.total}.` : null
+    ].filter(Boolean).join("\n")
   });
 
   setTimeout(async () => {
@@ -624,6 +722,12 @@ async function register({ client, config }) {
   const resolvedConfig = resolveConfig(config);
 
   client.once(Events.ClientReady, async () => {
+    const transcriptIssues = getTranscriptConfigurationIssues(resolvedConfig);
+
+    if (transcriptIssues.length) {
+      console.warn(`[tickets] Transcript desativado ate ajustar: ${transcriptIssues.join("; ")}.`);
+    }
+
     await ensurePanel(client, resolvedConfig).catch((error) => {
       console.error("[tickets] Falha ao preparar painel de tickets.", error);
     });
@@ -761,7 +865,7 @@ async function register({ client, config }) {
 
     if (interaction.isButton() && interaction.customId === CLOSE_TICKET_BUTTON_ID) {
       try {
-        await closeTicket(interaction, resolvedConfig);
+        await closeTicket(interaction, client, resolvedConfig);
       } catch (error) {
         console.error("[tickets] Falha ao fechar ticket.", error);
 
