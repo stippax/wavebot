@@ -788,7 +788,8 @@ async function closeTicket(interaction, client, config, options = {}) {
   const progressMessage = await interaction.followUp({
     content: shouldSaveTranscript
       ? "Salvando historico e anexos do ticket. Aguarde..."
-      : "Fechando ticket. Aguarde..."
+      : "Fechando ticket. Aguarde...",
+    flags: MessageFlags.Ephemeral
   }).catch(() => null);
 
   const updateStatusMessage = (content) => {
@@ -796,7 +797,7 @@ async function closeTicket(interaction, client, config, options = {}) {
       return progressMessage.edit({ content }).catch(() => {});
     }
 
-    return interaction.followUp({ content }).catch(() => {});
+    return interaction.followUp({ content, flags: MessageFlags.Ephemeral }).catch(() => {});
   };
 
   let transcript;
