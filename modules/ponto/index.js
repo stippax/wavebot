@@ -46,7 +46,9 @@ function resolveConfig(config) {
   return {
     guildId: isSnowflake(config.guildId) ? config.guildId : null,
     allowedChannelIds,
-    giveTimeRoleId: isSnowflake(config.giveTimeRoleId) ? config.giveTimeRoleId : null,
+    adminTimeRoleId: isSnowflake(config.adminTimeRoleId)
+      ? config.adminTimeRoleId
+      : (isSnowflake(config.giveTimeRoleId) ? config.giveTimeRoleId : null),
     embedColor: resolveHexColor(config.embedColor, 0x57f287),
     supabaseTable: typeof config.supabaseTable === "string" && config.supabaseTable.trim()
       ? config.supabaseTable.trim()
@@ -346,6 +348,17 @@ function buildPontoCommand() {
     )
     .addSubcommand((subcommand) =>
       subcommand
+        .setName("iniciar")
+        .setDescription("Inicia manualmente o ponto de um membro neste canal.")
+        .addUserOption((option) =>
+          option
+            .setName("usuario")
+            .setDescription("Membro que tera o ponto iniciado.")
+            .setRequired(true)
+        )
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
         .setName("adicionar")
         .setDescription("Adiciona tempo manualmente ao ponto de um membro neste canal.")
         .addUserOption((option) =>
@@ -388,6 +401,40 @@ function buildPontoCommand() {
             .setDescription("Membro que tera o ponto fechado.")
             .setRequired(true)
         )
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("remover")
+        .setDescription("Remove tempo manualmente do ponto de um membro neste canal.")
+        .addUserOption((option) =>
+          option
+            .setName("usuario")
+            .setDescription("Membro que perdera o tempo.")
+            .setRequired(true)
+        )
+        .addIntegerOption((option) =>
+          option
+            .setName("horas")
+            .setDescription("Quantidade de horas para remover.")
+            .setRequired(false)
+            .setMinValue(0)
+        )
+        .addIntegerOption((option) =>
+          option
+            .setName("minutos")
+            .setDescription("Quantidade de minutos para remover.")
+            .setRequired(false)
+            .setMinValue(0)
+            .setMaxValue(59)
+        )
+        .addIntegerOption((option) =>
+          option
+            .setName("segundos")
+            .setDescription("Quantidade de segundos para remover.")
+            .setRequired(false)
+            .setMinValue(0)
+            .setMaxValue(59)
+        )
     );
 }
 
@@ -419,12 +466,12 @@ function ensureAllowedChannel(interaction, config) {
   return false;
 }
 
-function canGiveTime(member, config) {
-  if (!config.giveTimeRoleId) {
+function canAdminTime(member, config) {
+  if (!config.adminTimeRoleId) {
     return false;
   }
 
-  return member.roles.cache.has(config.giveTimeRoleId);
+  return member.roles.cache.has(config.adminTimeRoleId);
 }
 
 async function persistGuildState(storage, state, guildId) {
@@ -484,6 +531,33 @@ async function handleStartCommand(interaction, config, state, storage) {
   await persistGuildState(storage, state, interaction.guildId);
 }
 
+async function startSessionForMember({ interaction, targetMember, state, storage, config }) {
+  const record = getUserRecord(state, interaction.guildId, targetMember.id);
+
+  if (record.activeSession) {
+    throw new Error("SESSION_ALREADY_ACTIVE");
+  }
+
+  record.activeSession = {
+    startedAt: Date.now(),
+    pausedAt: null,
+    pausedTotalMs: 0,
+    pauseCount: 0,
+    status: "running",
+    channelId: interaction.channelId,
+    messageId: null
+  };
+
+  await interaction.reply({
+    embeds: [buildSessionEmbed(targetMember, record, config)],
+    components: [buildActionRow(targetMember.id, false)]
+  });
+
+  const replyMessage = await interaction.fetchReply();
+  record.activeSession.messageId = replyMessage.id;
+  await persistGuildState(storage, state, interaction.guildId);
+}
+
 async function handleToggleButton(interaction, state, storage, config) {
   if (!interaction.inGuild()) {
     await interaction.reply({
@@ -495,9 +569,19 @@ async function handleToggleButton(interaction, state, storage, config) {
 
   const userId = interaction.customId.slice(TOGGLE_BUTTON_PREFIX.length);
 
-  if (interaction.user.id !== userId) {
+  const actingMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+
+  if (!actingMember) {
     await interaction.reply({
-      content: "Apenas o dono do ponto pode usar esse botao.",
+      content: "Nao consegui carregar seu perfil no servidor.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (interaction.user.id !== userId && !canAdminTime(actingMember, config)) {
+    await interaction.reply({
+      content: "Apenas o dono do ponto ou um administrador de ponto pode usar esse botao.",
       flags: MessageFlags.Ephemeral
     });
     return;
@@ -544,9 +628,19 @@ async function handleFinishButton(interaction, state, storage, config) {
 
   const userId = interaction.customId.slice(FINISH_BUTTON_PREFIX.length);
 
-  if (interaction.user.id !== userId) {
+  const actingMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+
+  if (!actingMember) {
     await interaction.reply({
-      content: "Apenas o dono do ponto pode usar esse botao.",
+      content: "Nao consegui carregar seu perfil no servidor.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (interaction.user.id !== userId && !canAdminTime(actingMember, config)) {
+    await interaction.reply({
+      content: "Apenas o dono do ponto ou um administrador de ponto pode usar esse botao.",
       flags: MessageFlags.Ephemeral
     });
     return;
@@ -681,8 +775,8 @@ async function handleGiveTimeCommand(interaction, state, storage, config) {
     return;
   }
 
-  if (!canGiveTime(actingMember, config)) {
-    const roleMention = config.giveTimeRoleId ? `<@&${config.giveTimeRoleId}>` : "o cargo configurado";
+  if (!canAdminTime(actingMember, config)) {
+    const roleMention = config.adminTimeRoleId ? `<@&${config.adminTimeRoleId}>` : "o cargo configurado";
 
     await interaction.reply({
       content: `Apenas membros com ${roleMention} podem usar este comando.`,
@@ -731,6 +825,134 @@ async function handleGiveTimeCommand(interaction, state, storage, config) {
   });
 }
 
+async function handleManualStartCommand(interaction, state, storage, config) {
+  if (!interaction.inGuild()) {
+    await interaction.reply({
+      content: "Esse comando so pode ser usado dentro de um servidor.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (!ensureAllowedChannel(interaction, config)) {
+    return;
+  }
+
+  const actingMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+
+  if (!actingMember) {
+    await interaction.reply({
+      content: "Nao consegui carregar seu perfil no servidor.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (!canAdminTime(actingMember, config)) {
+    const roleMention = config.adminTimeRoleId ? `<@&${config.adminTimeRoleId}>` : "o cargo configurado";
+
+    await interaction.reply({
+      content: `Apenas membros com ${roleMention} podem usar este comando.`,
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const targetUser = interaction.options.getUser("usuario", true);
+  const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+
+  if (!targetMember) {
+    await interaction.reply({
+      content: "Nao consegui encontrar esse membro no servidor.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  try {
+    await startSessionForMember({ interaction, targetMember, state, storage, config });
+  } catch (error) {
+    if (error?.message === "SESSION_ALREADY_ACTIVE") {
+      await interaction.reply({
+        content: "Esse membro ja tem um ponto aberto.",
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    throw error;
+  }
+}
+
+async function handleRemoveTimeCommand(interaction, state, storage, config) {
+  if (!interaction.inGuild()) {
+    await interaction.reply({
+      content: "Esse comando so pode ser usado dentro de um servidor.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const actingMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+
+  if (!actingMember) {
+    await interaction.reply({
+      content: "Nao consegui carregar seu perfil no servidor.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (!canAdminTime(actingMember, config)) {
+    const roleMention = config.adminTimeRoleId ? `<@&${config.adminTimeRoleId}>` : "o cargo configurado";
+
+    await interaction.reply({
+      content: `Apenas membros com ${roleMention} podem usar este comando.`,
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const targetUser = interaction.options.getUser("usuario", true);
+  const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+
+  if (!targetMember) {
+    await interaction.reply({
+      content: "Nao consegui encontrar esse membro no servidor.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const hours = interaction.options.getInteger("horas") || 0;
+  const minutes = interaction.options.getInteger("minutos") || 0;
+  const seconds = interaction.options.getInteger("segundos") || 0;
+  const totalMs = (((hours * 60) + minutes) * 60 + seconds) * 1000;
+
+  if (!totalMs) {
+    await interaction.reply({
+      content: "Informe pelo menos um valor maior que zero em horas, minutos ou segundos.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const record = getUserRecord(state, interaction.guildId, targetUser.id);
+  const channelRecord = getChannelRecord(record, interaction.channelId);
+  channelRecord.totalWorkedMs = Math.max(0, channelRecord.totalWorkedMs - totalMs);
+  channelRecord.lastFinishedAt = Date.now();
+  await persistGuildState(storage, state, interaction.guildId);
+
+  await interaction.reply({
+    embeds: [buildUserInfoEmbed(targetMember, {
+      ...channelRecord,
+      totalWorkedMs: getChannelTotalWorkedMs(record, interaction.channelId)
+    }, config, `${interaction.channel}`)],
+    flags: MessageFlags.Ephemeral,
+    content: `Removido ${formatDuration(totalMs)} do ponto de ${targetMember} neste canal.`
+  });
+}
+
 async function handleCloseCommand(interaction, state, storage, config) {
   if (!interaction.inGuild()) {
     await interaction.reply({
@@ -750,17 +972,17 @@ async function handleCloseCommand(interaction, state, storage, config) {
     return;
   }
 
-  if (!canGiveTime(actingMember, config)) {
-    const roleMention = config.giveTimeRoleId ? `<@&${config.giveTimeRoleId}>` : "o cargo configurado";
+  const targetUser = interaction.options.getUser("usuario", true);
+
+  if (targetUser.id !== interaction.user.id && !canAdminTime(actingMember, config)) {
+    const roleMention = config.adminTimeRoleId ? `<@&${config.adminTimeRoleId}>` : "o cargo configurado";
 
     await interaction.reply({
-      content: `Apenas membros com ${roleMention} podem usar este comando.`,
+      content: `Voce pode fechar apenas o proprio ponto sem permissao extra. Para fechar o de outra pessoa, precisa ter ${roleMention}.`,
       flags: MessageFlags.Ephemeral
     });
     return;
   }
-
-  const targetUser = interaction.options.getUser("usuario", true);
 
   try {
     const { member, channelRecord, sessionWorkedMs } = await closeActiveSession({
@@ -829,8 +1051,18 @@ async function register({ client, config }) {
             return;
           }
 
+          if (subcommand === "iniciar") {
+            await handleManualStartCommand(interaction, state, storage, resolvedConfig);
+            return;
+          }
+
           if (subcommand === "fechar") {
             await handleCloseCommand(interaction, state, storage, resolvedConfig);
+            return;
+          }
+
+          if (subcommand === "remover") {
+            await handleRemoveTimeCommand(interaction, state, storage, resolvedConfig);
             return;
           }
         }

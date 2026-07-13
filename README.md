@@ -98,14 +98,16 @@ Comandos:
 - `/bateponto`: abre um ponto e envia um embed com botoes de `Pausar` ou `Finalizar`
 - `/ranking ponto`: mostra os 10 membros com mais tempo acumulado
 - `/ponto ver usuario:@membro`: mostra as informacoes de ponto do membro marcado
+- `/ponto iniciar usuario:@membro`: inicia manualmente o ponto de um membro no canal atual
 - `/ponto adicionar usuario:@membro horas:<n> minutos:<n> segundos:<n>`: adiciona tempo manualmente ao ponto do membro no canal atual
 - `/ponto fechar usuario:@membro`: fecha manualmente o ponto ativo do membro
+- `/ponto remover usuario:@membro horas:<n> minutos:<n> segundos:<n>`: remove tempo manualmente do ponto do membro no canal atual
 
 Configure em `modules/ponto/config.json`:
 
 - `guildId`: servidor onde os slash commands serao registrados rapidamente
 - `allowedChannelId`: se preencher, limita o `/bateponto` a esse canal
-- `giveTimeRoleId`: cargo que pode usar `/dartempo`
+- `adminTimeRoleId`: cargo administrativo do ponto
 - `supabaseTable`: opcional, nome da tabela usada para salvar o estado do ponto
 
 Para ativar:
@@ -118,7 +120,9 @@ Observacoes:
 
 - ao reiniciar o bot, sessoes `Em andamento` continuam contando a partir do `startedAt` salvo no Supabase
 - ao reiniciar o bot, sessoes `Pausadas` continuam pausadas e nao acumulam tempo
-- `/ponto adicionar` e `/ponto fechar` exigem o cargo configurado em `giveTimeRoleId`
+- `/ponto iniciar`, `/ponto adicionar` e `/ponto remover` exigem o cargo configurado em `adminTimeRoleId`
+- `/ponto fechar` permite fechar o proprio ponto sem cargo extra, mas exige `adminTimeRoleId` para fechar o ponto de outra pessoa
+- quem tiver `adminTimeRoleId` tambem pode pausar, retomar e finalizar o ponto de outras pessoas pelos botoes
 - `/ponto adicionar` credita o tempo no canal onde o comando foi executado
 
 ## Modulo de log de mensagens
