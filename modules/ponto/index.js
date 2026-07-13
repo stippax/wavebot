@@ -6,14 +6,12 @@ const {
   EmbedBuilder,
   Events,
   MessageFlags,
-  PermissionFlagsBits,
   SlashCommandBuilder
 } = require("discord.js");
 
 const START_COMMAND_NAME = "bateponto";
 const RANKING_COMMAND_NAME = "ranking";
-const INFO_COMMAND_NAME = "ponto";
-const GIVE_TIME_COMMAND_NAME = "dartempo";
+const PONTO_COMMAND_NAME = "ponto";
 const TOGGLE_BUTTON_PREFIX = "ponto:toggle:";
 const FINISH_BUTTON_PREFIX = "ponto:finish:";
 const DEFAULT_TABLE = "bot_ponto";
@@ -48,6 +46,7 @@ function resolveConfig(config) {
   return {
     guildId: isSnowflake(config.guildId) ? config.guildId : null,
     allowedChannelIds,
+    giveTimeRoleId: isSnowflake(config.giveTimeRoleId) ? config.giveTimeRoleId : null,
     embedColor: resolveHexColor(config.embedColor, 0x57f287),
     supabaseTable: typeof config.supabaseTable === "string" && config.supabaseTable.trim()
       ? config.supabaseTable.trim()
@@ -320,61 +319,75 @@ function buildRankingCommand() {
     );
 }
 
-function buildInfoCommand() {
+function buildPontoCommand() {
   return new SlashCommandBuilder()
-    .setName(INFO_COMMAND_NAME)
-    .setDescription("Mostra as informacoes de ponto de um membro.")
-    .addUserOption((option) =>
-      option
-        .setName("usuario")
-        .setDescription("Membro que sera consultado.")
-        .setRequired(false)
-    )
-    .addStringOption((option) =>
-      option
-        .setName("escopo")
-        .setDescription("Escolha se o tempo sera deste canal ou geral.")
-        .setRequired(false)
-        .addChoices(
-          { name: "Canal atual", value: "canal" },
-          { name: "Geral", value: "geral" }
+    .setName(PONTO_COMMAND_NAME)
+    .setDescription("Consulta e gerencia pontos.")
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("ver")
+        .setDescription("Mostra as informacoes de ponto de um membro.")
+        .addUserOption((option) =>
+          option
+            .setName("usuario")
+            .setDescription("Membro que sera consultado.")
+            .setRequired(false)
         )
-    );
-}
-
-function buildGiveTimeCommand() {
-  return new SlashCommandBuilder()
-    .setName(GIVE_TIME_COMMAND_NAME)
-    .setDescription("Adiciona tempo manualmente ao ponto de um membro neste canal.")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-    .addUserOption((option) =>
-      option
-        .setName("usuario")
-        .setDescription("Membro que recebera o tempo.")
-        .setRequired(true)
+        .addStringOption((option) =>
+          option
+            .setName("escopo")
+            .setDescription("Escolha se o tempo sera deste canal ou geral.")
+            .setRequired(false)
+            .addChoices(
+              { name: "Canal atual", value: "canal" },
+              { name: "Geral", value: "geral" }
+            )
+        )
     )
-    .addIntegerOption((option) =>
-      option
-        .setName("horas")
-        .setDescription("Quantidade de horas para adicionar.")
-        .setRequired(false)
-        .setMinValue(0)
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("adicionar")
+        .setDescription("Adiciona tempo manualmente ao ponto de um membro neste canal.")
+        .addUserOption((option) =>
+          option
+            .setName("usuario")
+            .setDescription("Membro que recebera o tempo.")
+            .setRequired(true)
+        )
+        .addIntegerOption((option) =>
+          option
+            .setName("horas")
+            .setDescription("Quantidade de horas para adicionar.")
+            .setRequired(false)
+            .setMinValue(0)
+        )
+        .addIntegerOption((option) =>
+          option
+            .setName("minutos")
+            .setDescription("Quantidade de minutos para adicionar.")
+            .setRequired(false)
+            .setMinValue(0)
+            .setMaxValue(59)
+        )
+        .addIntegerOption((option) =>
+          option
+            .setName("segundos")
+            .setDescription("Quantidade de segundos para adicionar.")
+            .setRequired(false)
+            .setMinValue(0)
+            .setMaxValue(59)
+        )
     )
-    .addIntegerOption((option) =>
-      option
-        .setName("minutos")
-        .setDescription("Quantidade de minutos para adicionar.")
-        .setRequired(false)
-        .setMinValue(0)
-        .setMaxValue(59)
-    )
-    .addIntegerOption((option) =>
-      option
-        .setName("segundos")
-        .setDescription("Quantidade de segundos para adicionar.")
-        .setRequired(false)
-        .setMinValue(0)
-        .setMaxValue(59)
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("fechar")
+        .setDescription("Fecha manualmente o ponto ativo de um membro.")
+        .addUserOption((option) =>
+          option
+            .setName("usuario")
+            .setDescription("Membro que tera o ponto fechado.")
+            .setRequired(true)
+        )
     );
 }
 
@@ -384,8 +397,7 @@ function getCommands(config) {
   return [
     buildStartCommand().toJSON(),
     buildRankingCommand().toJSON(),
-    buildInfoCommand().toJSON(),
-    buildGiveTimeCommand().toJSON()
+    buildPontoCommand().toJSON()
   ].map((command) => ({
     command,
     guildId: resolvedConfig.guildId
@@ -405,6 +417,14 @@ function ensureAllowedChannel(interaction, config) {
   }).catch(() => {});
 
   return false;
+}
+
+function canGiveTime(member, config) {
+  if (!config.giveTimeRoleId) {
+    return false;
+  }
+
+  return member.roles.cache.has(config.giveTimeRoleId);
 }
 
 async function persistGuildState(storage, state, guildId) {
@@ -532,34 +552,13 @@ async function handleFinishButton(interaction, state, storage, config) {
     return;
   }
 
-  const record = getUserRecord(state, interaction.guildId, userId);
-  const session = record.activeSession;
-  const member = await interaction.guild.members.fetch(userId).catch(() => null);
-
-  if (!session || !member) {
-    await interaction.reply({
-      content: "Nao existe um ponto ativo valido para esse membro.",
-      flags: MessageFlags.Ephemeral
-    });
-    return;
-  }
-
-  if (session.status === "paused" && session.pausedAt) {
-    session.pausedTotalMs += Date.now() - session.pausedAt;
-    session.pausedAt = null;
-  }
-
-  const sessionWorkedMs = getWorkedMsForSession({
-    ...session,
-    status: "finished"
+  const { member, channelRecord, sessionWorkedMs } = await closeActiveSession({
+    guild: interaction.guild,
+    guildId: interaction.guildId,
+    userId,
+    state,
+    storage
   });
-  const channelRecord = getChannelRecord(record, session.channelId);
-
-  channelRecord.totalWorkedMs += sessionWorkedMs;
-  channelRecord.sessionCount += 1;
-  channelRecord.lastFinishedAt = Date.now();
-  record.activeSession = null;
-  await persistGuildState(storage, state, interaction.guildId);
 
   await interaction.update({
     embeds: [buildFinishedEmbed(member, channelRecord, sessionWorkedMs, config)],
@@ -630,10 +629,63 @@ async function handleInfoCommand(interaction, state, config) {
   });
 }
 
+async function closeActiveSession({ guild, guildId, userId, state, storage }) {
+  const record = getUserRecord(state, guildId, userId);
+  const session = record.activeSession;
+  const member = await guild.members.fetch(userId).catch(() => null);
+
+  if (!session || !member) {
+    throw new Error("NO_ACTIVE_SESSION");
+  }
+
+  if (session.status === "paused" && session.pausedAt) {
+    session.pausedTotalMs += Date.now() - session.pausedAt;
+    session.pausedAt = null;
+  }
+
+  const sessionWorkedMs = getWorkedMsForSession({
+    ...session,
+    status: "finished"
+  });
+  const channelRecord = getChannelRecord(record, session.channelId);
+
+  channelRecord.totalWorkedMs += sessionWorkedMs;
+  channelRecord.sessionCount += 1;
+  channelRecord.lastFinishedAt = Date.now();
+  record.activeSession = null;
+  await persistGuildState(storage, state, guildId);
+
+  return {
+    member,
+    channelRecord,
+    sessionWorkedMs
+  };
+}
+
 async function handleGiveTimeCommand(interaction, state, storage, config) {
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: "Esse comando so pode ser usado dentro de um servidor.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const actingMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+
+  if (!actingMember) {
+    await interaction.reply({
+      content: "Nao consegui carregar seu perfil no servidor.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (!canGiveTime(actingMember, config)) {
+    const roleMention = config.giveTimeRoleId ? `<@&${config.giveTimeRoleId}>` : "o cargo configurado";
+
+    await interaction.reply({
+      content: `Apenas membros com ${roleMention} podem usar este comando.`,
       flags: MessageFlags.Ephemeral
     });
     return;
@@ -679,6 +731,64 @@ async function handleGiveTimeCommand(interaction, state, storage, config) {
   });
 }
 
+async function handleCloseCommand(interaction, state, storage, config) {
+  if (!interaction.inGuild()) {
+    await interaction.reply({
+      content: "Esse comando so pode ser usado dentro de um servidor.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const actingMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+
+  if (!actingMember) {
+    await interaction.reply({
+      content: "Nao consegui carregar seu perfil no servidor.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  if (!canGiveTime(actingMember, config)) {
+    const roleMention = config.giveTimeRoleId ? `<@&${config.giveTimeRoleId}>` : "o cargo configurado";
+
+    await interaction.reply({
+      content: `Apenas membros com ${roleMention} podem usar este comando.`,
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const targetUser = interaction.options.getUser("usuario", true);
+
+  try {
+    const { member, channelRecord, sessionWorkedMs } = await closeActiveSession({
+      guild: interaction.guild,
+      guildId: interaction.guildId,
+      userId: targetUser.id,
+      state,
+      storage
+    });
+
+    await interaction.reply({
+      content: `Ponto de ${member} fechado manualmente.`,
+      embeds: [buildFinishedEmbed(member, channelRecord, sessionWorkedMs, config)],
+      flags: MessageFlags.Ephemeral
+    });
+  } catch (error) {
+    if (error?.message === "NO_ACTIVE_SESSION") {
+      await interaction.reply({
+        content: "Nao existe um ponto ativo valido para esse membro.",
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    throw error;
+  }
+}
+
 async function register({ client, config }) {
   const resolvedConfig = resolveConfig(config);
   const clientInstance = createSupabaseClient();
@@ -706,13 +816,23 @@ async function register({ client, config }) {
           return;
         }
 
-        if (interaction.commandName === INFO_COMMAND_NAME) {
-          await handleInfoCommand(interaction, state, resolvedConfig);
-          return;
-        }
+        if (interaction.commandName === PONTO_COMMAND_NAME) {
+          const subcommand = interaction.options.getSubcommand();
 
-        if (interaction.commandName === GIVE_TIME_COMMAND_NAME) {
-          await handleGiveTimeCommand(interaction, state, storage, resolvedConfig);
+          if (subcommand === "ver") {
+            await handleInfoCommand(interaction, state, resolvedConfig);
+            return;
+          }
+
+          if (subcommand === "adicionar") {
+            await handleGiveTimeCommand(interaction, state, storage, resolvedConfig);
+            return;
+          }
+
+          if (subcommand === "fechar") {
+            await handleCloseCommand(interaction, state, storage, resolvedConfig);
+            return;
+          }
         }
 
         return;
