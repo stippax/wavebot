@@ -217,12 +217,13 @@ function buildPanelComponents(config) {
   ];
 }
 
-function buildTicketCard(member, config, ticketType) {
+function buildTicketCard(member, config, ticketType, options = {}) {
   const effectiveStaffRoleId = ticketType.staffRoleId || config.staffRoleId;
   const welcomeMessage = ticketType.welcomeMessage || config.welcomeMessage;
   const mentionLine = effectiveStaffRoleId
     ? `${member} <@&${effectiveStaffRoleId}>`
     : `${member}`;
+  const claimedByLine = options.claimedBy ? `**Assumido por:** ${options.claimedBy}` : null;
 
   const container = new ContainerBuilder()
     .setAccentColor(0x57f287)
@@ -246,6 +247,7 @@ function buildTicketCard(member, config, ticketType) {
           `**Usuario:** ${member.user.tag}`,
           `**Criado em:** ${formatDate(new Date())}`,
           effectiveStaffRoleId ? `**Equipe notificada:** <@&${effectiveStaffRoleId}>` : null,
+          claimedByLine,
           "",
           welcomeMessage || "Descreva aqui o que voce precisa para a equipe continuar o atendimento."
         ].filter(Boolean).join("\n")
@@ -527,6 +529,68 @@ function buildTranscriptEmbed({ transcript, password, url, includePassword }) {
   return embed;
 }
 
+function buildClosedWithoutTranscriptEmbed({ channelName, ownerTag, claimedByTag, closedByTag }) {
+  const fields = [
+    { name: "Ticket", value: `#${truncate(channelName, 1000)}`, inline: true },
+    { name: "Aberto por", value: ownerTag || "Nao encontrado", inline: true },
+    { name: "Fechado por", value: closedByTag || "Nao encontrado", inline: true }
+  ];
+
+  if (claimedByTag) {
+    fields.push({
+      name: "Atendido por",
+      value: claimedByTag,
+      inline: true
+    });
+  }
+
+  return new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle("Ticket fechado sem historico")
+    .setDescription("Este ticket foi encerrado sem gerar transcript.")
+    .addFields(fields)
+    .setTimestamp(new Date());
+}
+
+async function findTicketCardMessage(channel) {
+  const messages = await channel.messages.fetch({ limit: 20 }).catch(() => null);
+
+  return messages?.find(
+    (message) => message.author.id === channel.client.user.id && messageHasCustomId(message, STAFF_MENU_BUTTON_ID)
+  ) || null;
+}
+
+async function refreshTicketCard(channel, config) {
+  const metadata = getTicketMetadata(channel);
+
+  if (!metadata) {
+    return;
+  }
+
+  const ticketType = findTicketType(config, metadata.ticketType);
+  const ownerMember = metadata.ownerId
+    ? await channel.guild.members.fetch(metadata.ownerId).catch(() => null)
+    : null;
+  const cardMessage = await findTicketCardMessage(channel);
+
+  if (!ticketType || !ownerMember || !cardMessage) {
+    return;
+  }
+
+  const claimedBy = metadata.claimedById
+    ? await channel.client.users.fetch(metadata.claimedById).catch(() => null)
+    : null;
+
+  await cardMessage.edit({
+    components: [
+      buildTicketCard(ownerMember, config, ticketType, {
+        claimedBy: claimedBy ? `${claimedBy} (${claimedBy.tag})` : null
+      })
+    ],
+    flags: MessageFlags.IsComponentsV2
+  }).catch(() => {});
+}
+
 async function notifyTranscriptMembers(client, guild, transcript, password, url) {
   const embed = buildTranscriptEmbed({
     transcript,
@@ -703,12 +767,24 @@ async function closeTicket(interaction, client, config, options = {}) {
 
       await notifyTranscriptMembers(client, interaction.guild, transcript, access.password, access.url);
     } else {
-      await sendTicketLog(
-        client,
-        interaction.guild,
-        config,
-        `${interaction.user} fechou o ticket ${interaction.channel} sem gerar historico.`
-      );
+      const metadata = getTicketMetadata(channel);
+      const ownerUser = metadata?.ownerId
+        ? await client.users.fetch(metadata.ownerId).catch(() => null)
+        : null;
+      const claimedByUser = metadata?.claimedById
+        ? await client.users.fetch(metadata.claimedById).catch(() => null)
+        : null;
+
+      await sendTicketLog(client, interaction.guild, config, {
+        embeds: [
+          buildClosedWithoutTranscriptEmbed({
+            channelName: channel.name,
+            ownerTag: ownerUser?.tag || null,
+            claimedByTag: claimedByUser?.tag || null,
+            closedByTag: interaction.user.tag
+          })
+        ]
+      });
     }
   } catch (error) {
     console.error("[tickets] Falha ao gerar historico do ticket.", error);
@@ -827,6 +903,7 @@ async function claimTicket(interaction, client, config) {
   }
 
   await updateTicketClaim(interaction.channel, metadata, interaction.user.id);
+  await refreshTicketCard(interaction.channel, config);
 
   await interaction.channel.send({
     content: `${interaction.user} assumiu este ticket.`
@@ -932,6 +1009,7 @@ async function transferTicket(interaction, client, config) {
   }
 
   await updateTicketClaim(interaction.channel, metadata, member.id);
+  await refreshTicketCard(interaction.channel, config);
 
   await interaction.channel.send({
     content: `${interaction.user} transferiu este ticket para ${member}.`
