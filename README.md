@@ -91,7 +91,7 @@ Configure em `modules/call-logs/config.json`:
 
 ## Modulo de ponto
 
-O modulo `ponto` cria um sistema simples de bater ponto com persistencia local em JSON.
+O modulo `ponto` cria um sistema simples de bater ponto com persistencia no Supabase.
 
 Comandos:
 
@@ -103,6 +103,13 @@ Configure em `modules/ponto/config.json`:
 
 - `guildId`: servidor onde os slash commands serao registrados rapidamente
 - `allowedChannelId`: se preencher, limita o `/bateponto` a esse canal
+- `supabaseTable`: opcional, nome da tabela usada para salvar o estado do ponto
+
+Para ativar:
+
+- crie a tabela com `supabase/migrations/20260713173000_create_ponto_states.sql`
+- defina `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`
+- opcionalmente defina `PONTO_TABLE` se quiser trocar o nome padrao `ponto_states`
 
 ## Modulo de log de mensagens
 

@@ -1,5 +1,4 @@
-const fs = require("node:fs");
-const path = require("node:path");
+const { createClient } = require("@supabase/supabase-js");
 const {
   ActionRowBuilder,
   ButtonBuilder,
@@ -15,6 +14,7 @@ const RANKING_COMMAND_NAME = "ranking";
 const INFO_COMMAND_NAME = "ponto";
 const TOGGLE_BUTTON_PREFIX = "ponto:toggle:";
 const FINISH_BUTTON_PREFIX = "ponto:finish:";
+const DEFAULT_TABLE = "ponto_states";
 
 function isSnowflake(value) {
   return typeof value === "string" && /^\d{17,20}$/.test(value);
@@ -46,31 +46,72 @@ function resolveConfig(config) {
   return {
     guildId: isSnowflake(config.guildId) ? config.guildId : null,
     allowedChannelIds,
-    embedColor: resolveHexColor(config.embedColor, 0x57f287)
+    embedColor: resolveHexColor(config.embedColor, 0x57f287),
+    supabaseTable: typeof config.supabaseTable === "string" && config.supabaseTable.trim()
+      ? config.supabaseTable.trim()
+      : process.env.PONTO_TABLE || DEFAULT_TABLE
   };
 }
 
-function ensureDataFile(dataFilePath) {
-  if (!fs.existsSync(dataFilePath)) {
-    fs.writeFileSync(dataFilePath, `${JSON.stringify({ guilds: {} }, null, 2)}\n`, "utf8");
+function createSupabaseClient() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+
+  if (!url || !key) {
+    return null;
   }
+
+  return createClient(url, key, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false
+    }
+  });
 }
 
-function loadState(dataFilePath) {
-  ensureDataFile(dataFilePath);
-
-  try {
-    const parsed = JSON.parse(fs.readFileSync(dataFilePath, "utf8"));
-    return parsed && typeof parsed === "object" && parsed.guilds
-      ? parsed
-      : { guilds: {} };
-  } catch {
-    return { guilds: {} };
+function normalizeGuildState(value) {
+  if (!value || typeof value !== "object") {
+    return { users: {} };
   }
+
+  return {
+    users: value.users && typeof value.users === "object" ? value.users : {}
+  };
 }
 
-function saveState(dataFilePath, state) {
-  fs.writeFileSync(dataFilePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+async function loadState(storage) {
+  const { data, error } = await storage.client
+    .from(storage.table)
+    .select("guild_id, state");
+
+  if (error) {
+    throw error;
+  }
+
+  const guilds = {};
+
+  for (const row of data || []) {
+    if (!isSnowflake(row.guild_id)) {
+      continue;
+    }
+
+    guilds[row.guild_id] = normalizeGuildState(row.state);
+  }
+
+  return { guilds };
+}
+
+async function saveGuildState(storage, guildId, guildState) {
+  const { error } = await storage.client
+    .from(storage.table)
+    .upsert({
+      guild_id: guildId,
+      state: normalizeGuildState(guildState)
+    }, { onConflict: "guild_id" });
+
+  if (error) {
+    throw error;
+  }
 }
 
 function getGuildState(state, guildId) {
@@ -327,7 +368,11 @@ function ensureAllowedChannel(interaction, config) {
   return false;
 }
 
-async function handleStartCommand(interaction, config, state, dataFilePath) {
+async function persistGuildState(storage, state, guildId) {
+  await saveGuildState(storage, guildId, getGuildState(state, guildId));
+}
+
+async function handleStartCommand(interaction, config, state, storage) {
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: "Esse comando so pode ser usado dentro de um servidor.",
@@ -377,10 +422,10 @@ async function handleStartCommand(interaction, config, state, dataFilePath) {
 
   const replyMessage = await interaction.fetchReply();
   record.activeSession.messageId = replyMessage.id;
-  saveState(dataFilePath, state);
+  await persistGuildState(storage, state, interaction.guildId);
 }
 
-async function handleToggleButton(interaction, state, dataFilePath, config) {
+async function handleToggleButton(interaction, state, storage, config) {
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: "Esse botao so funciona dentro de um servidor.",
@@ -421,7 +466,7 @@ async function handleToggleButton(interaction, state, dataFilePath, config) {
     session.status = "paused";
   }
 
-  saveState(dataFilePath, state);
+  await persistGuildState(storage, state, interaction.guildId);
 
   await interaction.update({
     embeds: [buildSessionEmbed(member, record, config)],
@@ -429,7 +474,7 @@ async function handleToggleButton(interaction, state, dataFilePath, config) {
   });
 }
 
-async function handleFinishButton(interaction, state, dataFilePath, config) {
+async function handleFinishButton(interaction, state, storage, config) {
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: "Esse botao so funciona dentro de um servidor.",
@@ -475,7 +520,7 @@ async function handleFinishButton(interaction, state, dataFilePath, config) {
   channelRecord.sessionCount += 1;
   channelRecord.lastFinishedAt = Date.now();
   record.activeSession = null;
-  saveState(dataFilePath, state);
+  await persistGuildState(storage, state, interaction.guildId);
 
   await interaction.update({
     embeds: [buildFinishedEmbed(member, channelRecord, sessionWorkedMs, config)],
@@ -546,16 +591,25 @@ async function handleInfoCommand(interaction, state, config) {
   });
 }
 
-async function register({ client, config, modulePath }) {
+async function register({ client, config }) {
   const resolvedConfig = resolveConfig(config);
-  const dataFilePath = path.join(modulePath, "data.json");
-  const state = loadState(dataFilePath);
+  const clientInstance = createSupabaseClient();
+
+  if (!clientInstance) {
+    throw new Error("[ponto] Supabase nao configurado. Defina SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY.");
+  }
+
+  const storage = {
+    client: clientInstance,
+    table: resolvedConfig.supabaseTable
+  };
+  const state = await loadState(storage);
 
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
       if (interaction.isChatInputCommand()) {
         if (interaction.commandName === START_COMMAND_NAME) {
-          await handleStartCommand(interaction, resolvedConfig, state, dataFilePath);
+          await handleStartCommand(interaction, resolvedConfig, state, storage);
           return;
         }
 
@@ -576,12 +630,12 @@ async function register({ client, config, modulePath }) {
       }
 
       if (interaction.customId.startsWith(TOGGLE_BUTTON_PREFIX)) {
-        await handleToggleButton(interaction, state, dataFilePath, resolvedConfig);
+        await handleToggleButton(interaction, state, storage, resolvedConfig);
         return;
       }
 
       if (interaction.customId.startsWith(FINISH_BUTTON_PREFIX)) {
-        await handleFinishButton(interaction, state, dataFilePath, resolvedConfig);
+        await handleFinishButton(interaction, state, storage, resolvedConfig);
       }
     } catch (error) {
       console.error("[ponto] Falha ao processar interacao.", error);
