@@ -5,3 +5,4 @@ node_modules/
 squarecloud-deploy.zip
 supabase/.temp/
 supabase/.branches/
+modules/ponto/data.json
