@@ -6,12 +6,14 @@ const {
   EmbedBuilder,
   Events,
   MessageFlags,
+  PermissionFlagsBits,
   SlashCommandBuilder
 } = require("discord.js");
 
 const START_COMMAND_NAME = "bateponto";
 const RANKING_COMMAND_NAME = "ranking";
 const INFO_COMMAND_NAME = "ponto";
+const GIVE_TIME_COMMAND_NAME = "dartempo";
 const TOGGLE_BUTTON_PREFIX = "ponto:toggle:";
 const FINISH_BUTTON_PREFIX = "ponto:finish:";
 const DEFAULT_TABLE = "ponto_states";
@@ -340,13 +342,50 @@ function buildInfoCommand() {
     );
 }
 
+function buildGiveTimeCommand() {
+  return new SlashCommandBuilder()
+    .setName(GIVE_TIME_COMMAND_NAME)
+    .setDescription("Adiciona tempo manualmente ao ponto de um membro neste canal.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addUserOption((option) =>
+      option
+        .setName("usuario")
+        .setDescription("Membro que recebera o tempo.")
+        .setRequired(true)
+    )
+    .addIntegerOption((option) =>
+      option
+        .setName("horas")
+        .setDescription("Quantidade de horas para adicionar.")
+        .setRequired(false)
+        .setMinValue(0)
+    )
+    .addIntegerOption((option) =>
+      option
+        .setName("minutos")
+        .setDescription("Quantidade de minutos para adicionar.")
+        .setRequired(false)
+        .setMinValue(0)
+        .setMaxValue(59)
+    )
+    .addIntegerOption((option) =>
+      option
+        .setName("segundos")
+        .setDescription("Quantidade de segundos para adicionar.")
+        .setRequired(false)
+        .setMinValue(0)
+        .setMaxValue(59)
+    );
+}
+
 function getCommands(config) {
   const resolvedConfig = resolveConfig(config);
 
   return [
     buildStartCommand().toJSON(),
     buildRankingCommand().toJSON(),
-    buildInfoCommand().toJSON()
+    buildInfoCommand().toJSON(),
+    buildGiveTimeCommand().toJSON()
   ].map((command) => ({
     command,
     guildId: resolvedConfig.guildId
@@ -591,6 +630,55 @@ async function handleInfoCommand(interaction, state, config) {
   });
 }
 
+async function handleGiveTimeCommand(interaction, state, storage, config) {
+  if (!interaction.inGuild()) {
+    await interaction.reply({
+      content: "Esse comando so pode ser usado dentro de um servidor.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const targetUser = interaction.options.getUser("usuario", true);
+  const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+
+  if (!targetMember) {
+    await interaction.reply({
+      content: "Nao consegui encontrar esse membro no servidor.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const hours = interaction.options.getInteger("horas") || 0;
+  const minutes = interaction.options.getInteger("minutos") || 0;
+  const seconds = interaction.options.getInteger("segundos") || 0;
+  const totalMs = (((hours * 60) + minutes) * 60 + seconds) * 1000;
+
+  if (!totalMs) {
+    await interaction.reply({
+      content: "Informe pelo menos um valor maior que zero em horas, minutos ou segundos.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const record = getUserRecord(state, interaction.guildId, targetUser.id);
+  const channelRecord = getChannelRecord(record, interaction.channelId);
+  channelRecord.totalWorkedMs += totalMs;
+  channelRecord.lastFinishedAt = Date.now();
+  await persistGuildState(storage, state, interaction.guildId);
+
+  await interaction.reply({
+    embeds: [buildUserInfoEmbed(targetMember, {
+      ...channelRecord,
+      totalWorkedMs: getChannelTotalWorkedMs(record, interaction.channelId)
+    }, config, `${interaction.channel}`)],
+    flags: MessageFlags.Ephemeral,
+    content: `Adicionado ${formatDuration(totalMs)} ao ponto de ${targetMember} neste canal.`
+  });
+}
+
 async function register({ client, config }) {
   const resolvedConfig = resolveConfig(config);
   const clientInstance = createSupabaseClient();
@@ -620,6 +708,11 @@ async function register({ client, config }) {
 
         if (interaction.commandName === INFO_COMMAND_NAME) {
           await handleInfoCommand(interaction, state, resolvedConfig);
+          return;
+        }
+
+        if (interaction.commandName === GIVE_TIME_COMMAND_NAME) {
+          await handleGiveTimeCommand(interaction, state, storage, resolvedConfig);
         }
 
         return;

@@ -98,6 +98,7 @@ Comandos:
 - `/bateponto`: abre um ponto e envia um embed com botoes de `Pausar` ou `Finalizar`
 - `/ranking ponto`: mostra os 10 membros com mais tempo acumulado
 - `/ponto usuario:@membro`: mostra as informacoes de ponto do membro marcado
+- `/dartempo usuario:@membro horas:<n> minutos:<n> segundos:<n>`: adiciona tempo manualmente ao ponto do membro no canal atual
 
 Configure em `modules/ponto/config.json`:
 
@@ -110,6 +111,12 @@ Para ativar:
 - crie a tabela com `supabase/migrations/20260713173000_create_ponto_states.sql`
 - defina `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`
 - opcionalmente defina `PONTO_TABLE` se quiser trocar o nome padrao `ponto_states`
+
+Observacoes:
+
+- ao reiniciar o bot, sessoes `Em andamento` continuam contando a partir do `startedAt` salvo no Supabase
+- ao reiniciar o bot, sessoes `Pausadas` continuam pausadas e nao acumulam tempo
+- `/dartempo` exige permissao `Manage Server` e credita o tempo no canal onde o comando foi executado
 
 ## Modulo de log de mensagens
 
