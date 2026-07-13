@@ -104,8 +104,8 @@ function serializeAttachment(attachment, storage = null) {
   return {
     id: attachment.id,
     name: storage?.fileName || attachment.name,
-    url: attachment.url,
-    proxyUrl: attachment.proxyURL || null,
+    url: storage ? null : attachment.url,
+    proxyUrl: storage ? null : (attachment.proxyURL || null),
     contentType: storage?.contentType || attachment.contentType || null,
     size: attachment.size || 0,
     storage
