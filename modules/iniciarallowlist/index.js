@@ -13,14 +13,13 @@ const {
   TextInputBuilder,
   TextInputStyle
 } = require("discord.js");
-const mysql = require("mysql2/promise");
-
 const OPEN_MODAL_CUSTOM_ID = "iniciarallowlist:open";
 const SUBMIT_MODAL_CUSTOM_ID = "iniciarallowlist:submit";
 const NAME_INPUT_CUSTOM_ID = "iniciarallowlist:nome";
 const TOKEN_INPUT_CUSTOM_ID = "iniciarallowlist:token";
 
 let pool = null;
+let mysql = null;
 
 function isSnowflake(value) {
   return typeof value === "string" && /^\d{17,20}$/.test(value);
@@ -57,6 +56,14 @@ function resolveConfig(config) {
 function getPool(config) {
   if (!config.mysqlUrl) {
     throw new Error("MYSQL_URL nao foi configurada para o modulo iniciarallowlist.");
+  }
+
+  if (!mysql) {
+    try {
+      mysql = require("mysql2/promise");
+    } catch (error) {
+      throw new Error(`Dependencia mysql2 indisponivel: ${error.message}`);
+    }
   }
 
   if (!pool) {

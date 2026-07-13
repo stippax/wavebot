@@ -62,18 +62,18 @@ function formatTime(config, date) {
   }).format(date);
 }
 
-function buildStatusContent(config) {
-  const statusLabel = "STATUS".padEnd(14, " ");
-  const ipLabel = config.ipLabel.toUpperCase().padEnd(24, " ");
-  const statusValue = `\u25cf ${config.statusLabel}`.padEnd(14, " ");
-  const ipValue = config.serverIp.padEnd(24, " ");
+function formatCopyField(label, value) {
+  const safeValue = String(value || "-").replace(/```/g, "'''");
 
+  return [`**${label}**`, "```", safeValue, "```"].join("\n");
+}
+
+function buildStatusFields(config) {
   return [
-    "```ansi",
-    `${statusLabel}${ipLabel}${config.websiteLabel.toUpperCase()}`,
-    `\u001b[2;32m${statusValue}\u001b[0m\u001b[2;34m${ipValue}\u001b[0m${config.website}`,
-    "```"
-  ].join("\n");
+    formatCopyField("STATUS", config.statusLabel),
+    formatCopyField(config.ipLabel, config.serverIp),
+    formatCopyField(config.websiteLabel, config.website)
+  ];
 }
 
 function buildFooterText(config, updatedAt) {
@@ -132,7 +132,7 @@ function buildStatusPanel(config, updatedAt = new Date()) {
     .addSectionComponents(header)
     .addSeparatorComponents(new SeparatorBuilder())
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(buildStatusContent(config))
+      ...buildStatusFields(config).map((field) => new TextDisplayBuilder().setContent(field))
     );
 
   if (config.bannerUrl) {

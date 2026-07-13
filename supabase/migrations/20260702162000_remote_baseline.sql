@@ -1,0 +1,1 @@
+-- Existing remote migration placeholder for Supabase history alignment.

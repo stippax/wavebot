@@ -54,6 +54,7 @@ O projeto ja inclui o arquivo `squarecloud.app` na raiz, pronto para deploy.
 - Nao envie `.env` ou `.env.local` para producao.
 - A Square Cloud instala as dependencias a partir do `package.json`.
 - O comando de inicializacao usado no deploy e `npm run start`.
+- Antes de empacotar para a Square Cloud, rode `npm run deploy:prepare` para recriar `.\.squarecloud-deploy-temp` a partir da raiz atual do projeto.
 
 ## Estrutura
 
@@ -81,6 +82,8 @@ Configure em `modules/tickets/config.json`:
 - `categoryId`: categoria onde os tickets serao criados
 - `staffRoleId`: cargo da equipe que pode visualizar e responder
 - `ticketLogChannelId`: canal para logs de acoes do ticket, como saida de membros
+- `transcriptBaseUrl`: URL publica do site que exibira o transcript
+- `transcriptTable`: tabela do Supabase usada para salvar os transcripts
 - `ticketTypes`: lista de tipos de ticket exibidos no select
 
 Fluxo:
@@ -92,7 +95,14 @@ Fluxo:
 - o ticket possui `Menu Staff`, que abre um painel efemero para adicionar e remover membros
 - o ticket possui `Sair do Ticket` para o criador ou membros adicionados sairem do canal
 - quando alguem sai do ticket, o bot registra isso no canal configurado em `ticketLogChannelId`
+- ao fechar, o bot salva o transcript no Supabase e envia o link com senha
 - o botao `Fechar Ticket` apaga o canal apos 5 segundos
+
+Para ativar transcripts:
+
+- crie a tabela com `supabase/migrations/20260712_create_ticket_transcripts.sql`
+- defina no bot `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `TICKET_TRANSCRIPT_BASE_URL` e opcionalmente `TICKET_TRANSCRIPT_TABLE`
+- defina no site `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` e opcionalmente `TICKET_TRANSCRIPT_TABLE`
 
 ## Modulo de cargos por reacao
 
@@ -149,6 +159,33 @@ Observacoes:
 - `PIX_RECEIVER_NAME` e opcional; se nao informar, o bot usa `LINEUP LABS`
 - `PIX_RECEIVER_CITY` e opcional; se nao informar, o bot usa `SAO PAULO`
 - se depois voce quiser Pix dinamico via gateway, da para evoluir este modulo
+
+## Modulo de setagem de membros
+
+O modulo `setagem-membros` cria um fluxo simples de aprovacao manual:
+
+- o bot publica ou atualiza automaticamente um painel com o botao `Iniciar Setagem`
+- o membro abre um modal com `Nome`, `ID` e um `dropdown` de cargos
+- a solicitacao vai para um canal de revisao com botoes `Aceitar` e `Negar`
+- ao aceitar, o bot entrega o cargo selecionado e tenta renomear o membro para o padrao `[SIGLA] Nome | ID`
+- ao negar, o bot expulsa o membro do servidor
+
+Configure em `modules/setagem-membros/config.json`:
+
+- `panelChannelId`: canal onde o painel inicial sera enviado
+- `reviewChannelId`: canal onde a equipe revisa as solicitacoes
+- `reviewerRoleId`: cargo que pode revisar as setagens
+- `roles`: lista de cargos liberados no dropdown
+- `roles[].grantRoleIds`: cargos que serao entregues ao aprovar aquela opcao
+- `roles[].shortLabel`: sigla usada apenas na renomeacao do membro
+
+Observacoes:
+
+- o bot precisa de `Manage Roles` para aprovar e entregar cargos
+- o bot precisa de `Manage Nicknames` para aplicar a renomeacao automatica
+- o bot precisa de `Kick Members` para negar e expulsar membros
+- a hierarquia do bot deve ficar acima dos cargos que ele vai entregar
+- `Nome` e `ID` sao limitados no modal para ajudar a caber no nickname padrao
 
 ## Criando novos modulos
 

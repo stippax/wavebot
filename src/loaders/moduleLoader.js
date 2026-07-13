@@ -23,7 +23,15 @@ async function loadModules(client) {
       continue;
     }
 
-    const moduleDefinition = require(modulePath);
+    let moduleDefinition;
+
+    try {
+      moduleDefinition = require(modulePath);
+    } catch (error) {
+      console.error(`Modulo ignorado em ${folderName}: falha ao carregar.`, error);
+      continue;
+    }
+
     const config = fs.existsSync(configPath) ? require(configPath) : {};
 
     if (typeof moduleDefinition.register !== "function") {

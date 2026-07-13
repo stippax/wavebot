@@ -1,3 +1,7 @@
 node_modules/
 .env
 .env.local
+.squarecloud-deploy-temp/
+squarecloud-deploy.zip
+supabase/.temp/
+supabase/.branches/

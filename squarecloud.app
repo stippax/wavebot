@@ -1,4 +1,4 @@
-ID=cefab8d728ab4fb58582b96e9eea966b
+ID=be8108a5ae874395bad5200153e1a2c8
 DISPLAY_NAME=Lineup Labs Bot
 DESCRIPTION=Bot modular para Discord com logs de entrada e saida.
 MAIN=src/index.js
