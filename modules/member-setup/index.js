@@ -18,6 +18,7 @@ const {
   TextInputStyle,
   ThumbnailBuilder
 } = require("discord.js");
+const { consumeInteractionCooldown } = require("../../src/utils/interactionCooldown");
 
 const OPEN_MODAL_CUSTOM_ID = "setagem-membros:open";
 const SUBMIT_MODAL_CUSTOM_ID = "setagem-membros:submit";
@@ -38,6 +39,12 @@ const MAX_PLAYER_ID_LENGTH = 8;
 
 const decisionLocks = new Set();
 const reviewRequests = new Map();
+
+function isMemberSetupButton(customId) {
+  return customId === OPEN_MODAL_CUSTOM_ID
+    || customId.startsWith(`${APPROVE_PREFIX}:`)
+    || customId.startsWith(`${DENY_PREFIX}:`);
+}
 
 function isSnowflake(value) {
   return typeof value === "string" && /^\d{17,20}$/.test(value);
@@ -681,6 +688,14 @@ async function register({ client, config }) {
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
+    if (
+      interaction.isButton()
+      && isMemberSetupButton(interaction.customId)
+      && !(await consumeInteractionCooldown(interaction, { scope: "member-setup:button" }))
+    ) {
+      return;
+    }
+
     if (interaction.isButton() && interaction.customId === OPEN_MODAL_CUSTOM_ID) {
       if (interaction.replied || interaction.deferred) {
         return;

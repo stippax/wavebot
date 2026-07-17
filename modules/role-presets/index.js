@@ -107,10 +107,30 @@ function getCommands(config) {
   }];
 }
 
+async function resolveInteractionGuild(interaction) {
+  if (!interaction.guildId) {
+    return null;
+  }
+
+  return interaction.guild
+    || interaction.client.guilds.cache.get(interaction.guildId)
+    || await interaction.client.guilds.fetch(interaction.guildId).catch(() => null);
+}
+
 async function handleCommand(interaction, config) {
   if (!interaction.inGuild()) {
     await interaction.reply({
       content: "Este comando so pode ser usado dentro de um servidor.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const guild = await resolveInteractionGuild(interaction);
+
+  if (!guild) {
+    await interaction.reply({
+      content: "Nao consegui carregar os dados deste servidor agora.",
       flags: MessageFlags.Ephemeral
     });
     return;
@@ -128,7 +148,7 @@ async function handleCommand(interaction, config) {
     return;
   }
 
-  const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+  const targetMember = await guild.members.fetch(targetUser.id).catch(() => null);
 
   if (!targetMember) {
     await interaction.reply({
@@ -138,7 +158,7 @@ async function handleCommand(interaction, config) {
     return;
   }
 
-  const me = interaction.guild.members.me;
+  const me = guild.members.me || await guild.members.fetchMe().catch(() => null);
 
   if (!me?.permissions.has(PermissionFlagsBits.ManageRoles)) {
     await interaction.reply({
@@ -151,7 +171,7 @@ async function handleCommand(interaction, config) {
   const rolesToGrant = [];
 
   for (const roleId of preset.roleIds) {
-    const role = interaction.guild.roles.cache.get(roleId) || await interaction.guild.roles.fetch(roleId).catch(() => null);
+    const role = guild.roles.cache.get(roleId) || await guild.roles.fetch(roleId).catch(() => null);
 
     if (!role) {
       await interaction.reply({

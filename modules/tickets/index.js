@@ -17,6 +17,7 @@ const {
   ThumbnailBuilder,
   UserSelectMenuBuilder
 } = require("discord.js");
+const { consumeInteractionCooldown } = require("../../src/utils/interactionCooldown");
 const { buildTranscript, saveTranscript, getTranscriptConfigurationIssues } = require("./transcripts");
 
 const TICKET_TYPE_SELECT_ID = "tickets:type-select";
@@ -33,6 +34,17 @@ const ADD_MEMBER_SELECT_ID = "tickets:add-member-select";
 const REMOVE_MEMBER_SELECT_ID = "tickets:remove-member-select";
 const TRANSFER_TICKET_SELECT_ID = "tickets:transfer-select";
 const TICKET_TOPIC_PREFIX = "ticket-owner:";
+const TICKET_BUTTON_IDS = new Set([
+  CLOSE_TICKET_BUTTON_ID,
+  STAFF_MENU_BUTTON_ID,
+  LEAVE_TICKET_BUTTON_ID,
+  CLAIM_TICKET_BUTTON_ID,
+  TRANSFER_TICKET_BUTTON_ID,
+  CONFIRM_CLOSE_WITH_TRANSCRIPT_BUTTON_ID,
+  CONFIRM_CLOSE_WITHOUT_TRANSCRIPT_BUTTON_ID,
+  ADD_MEMBER_BUTTON_ID,
+  REMOVE_MEMBER_BUTTON_ID
+]);
 const closingTicketIds = new Set();
 
 function isConsumedInteractionError(error) {
@@ -1336,6 +1348,14 @@ async function register({ client, config }) {
         }
       }
 
+      return;
+    }
+
+    if (
+      interaction.isButton()
+      && TICKET_BUTTON_IDS.has(interaction.customId)
+      && !(await consumeInteractionCooldown(interaction, { scope: "tickets:button" }))
+    ) {
       return;
     }
 

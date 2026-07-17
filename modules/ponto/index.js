@@ -8,6 +8,7 @@ const {
   MessageFlags,
   SlashCommandBuilder
 } = require("discord.js");
+const { consumeInteractionCooldown } = require("../../src/utils/interactionCooldown");
 
 const START_COMMAND_NAME = "bateponto";
 const RANKING_COMMAND_NAME = "ranking";
@@ -646,13 +647,29 @@ async function handleFinishButton(interaction, state, storage, config) {
     return;
   }
 
-  const { member, channelRecord, sessionWorkedMs } = await closeActiveSession({
-    guild: interaction.guild,
-    guildId: interaction.guildId,
-    userId,
-    state,
-    storage
-  });
+  let result;
+
+  try {
+    result = await closeActiveSession({
+      guild: interaction.guild,
+      guildId: interaction.guildId,
+      userId,
+      state,
+      storage
+    });
+  } catch (error) {
+    if (error?.message === "NO_ACTIVE_SESSION") {
+      await interaction.reply({
+        content: "Nao existe um ponto ativo valido para esse membro.",
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    throw error;
+  }
+
+  const { member, channelRecord, sessionWorkedMs } = result;
 
   await interaction.update({
     embeds: [buildFinishedEmbed(member, channelRecord, sessionWorkedMs, config)],
@@ -1071,6 +1088,13 @@ async function register({ client, config }) {
       }
 
       if (!interaction.isButton()) {
+        return;
+      }
+
+      if (
+        (interaction.customId.startsWith(TOGGLE_BUTTON_PREFIX) || interaction.customId.startsWith(FINISH_BUTTON_PREFIX))
+        && !(await consumeInteractionCooldown(interaction, { scope: "ponto:button" }))
+      ) {
         return;
       }
 
