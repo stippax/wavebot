@@ -16,6 +16,9 @@ const PONTO_COMMAND_NAME = "ponto";
 const TOGGLE_BUTTON_PREFIX = "ponto:toggle:";
 const FINISH_BUTTON_PREFIX = "ponto:finish:";
 const DEFAULT_TABLE = "bot_ponto";
+const AUTO_CLOSE_AFTER_MS = 12 * 60 * 60 * 1000;
+const AUTO_CLOSE_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
+const autoClosingSessions = new Set();
 
 function isSnowflake(value) {
   return typeof value === "string" && /^\d{17,20}$/.test(value);
@@ -819,6 +822,72 @@ async function closeActiveSession({ guild, guildId, userId, state, storage }) {
   };
 }
 
+function isSessionExpired(session, now = Date.now()) {
+  return Boolean(session?.startedAt) && now - session.startedAt >= AUTO_CLOSE_AFTER_MS;
+}
+
+async function autoCloseExpiredSessions({ client, state, storage, config }) {
+  const now = Date.now();
+
+  for (const [guildId, guildState] of Object.entries(state.guilds)) {
+    const guild = client.guilds.cache.get(guildId) || await client.guilds.fetch(guildId).catch(() => null);
+
+    if (!guild || !guildState?.users) {
+      continue;
+    }
+
+    for (const [userId, record] of Object.entries(guildState.users)) {
+      const session = record?.activeSession;
+      const lockKey = `${guildId}:${userId}`;
+
+      if (!isSessionExpired(session, now) || autoClosingSessions.has(lockKey)) {
+        continue;
+      }
+
+      autoClosingSessions.add(lockKey);
+
+      try {
+        const { member, channelRecord, sessionWorkedMs, closedSession } = await closeActiveSession({
+          guild,
+          guildId,
+          userId,
+          state,
+          storage
+        });
+
+        await updateSessionMessageAsFinished({
+          guild,
+          session: closedSession,
+          member,
+          channelRecord,
+          sessionWorkedMs,
+          config
+        });
+
+        console.log(`[ponto] Ponto de ${userId} fechado automaticamente apos 12h.`);
+      } catch (error) {
+        if (error?.message !== "NO_ACTIVE_SESSION") {
+          console.error(`[ponto] Falha ao fechar ponto automaticamente de ${userId}.`, error);
+        }
+      } finally {
+        autoClosingSessions.delete(lockKey);
+      }
+    }
+  }
+}
+
+function startAutoCloseSweep({ client, state, storage, config }) {
+  const runSweep = () => {
+    autoCloseExpiredSessions({ client, state, storage, config }).catch((error) => {
+      console.error("[ponto] Falha na varredura de fechamento automatico.", error);
+    });
+  };
+
+  runSweep();
+  const interval = setInterval(runSweep, AUTO_CLOSE_SWEEP_INTERVAL_MS);
+  interval.unref?.();
+}
+
 async function handleGiveTimeCommand(interaction, state, storage, config) {
   if (!interaction.inGuild()) {
     await interaction.reply({
@@ -1096,6 +1165,13 @@ async function register({ client, config }) {
     table: resolvedConfig.supabaseTable
   };
   const state = await loadState(storage);
+
+  startAutoCloseSweep({
+    client,
+    state,
+    storage,
+    config: resolvedConfig
+  });
 
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
