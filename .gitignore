@@ -3,6 +3,7 @@ node_modules/
 .env.local
 .squarecloud-deploy-temp/
 squarecloud-deploy.zip
+squarecloud-logs-latest.txt
 supabase/.temp/
 supabase/.branches/
 modules/ponto/data.json
