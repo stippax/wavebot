@@ -1,0 +1,13 @@
+{
+  "guildId": "COLOQUE_O_ID_DO_SERVIDOR_PARA_REGISTRAR_O_COMANDO",
+  "currencyId": "BRL",
+  "defaultTitle": "Pagamento",
+  "defaultDescription": "Pagamento gerado pelo bot.",
+  "pixButtonLabel": "Pix",
+  "cardButtonLabel": "Cartao (Mercado Pago)",
+  "successUrl": "https://exemplo.com/pagamento/sucesso",
+  "pendingUrl": "https://exemplo.com/pagamento/pendente",
+  "failureUrl": "https://exemplo.com/pagamento/falha",
+  "marketplaceButtonLabel": "Pagar com Mercado Pago",
+  "statementDescriptor": "HIPESTUDIO"
+}

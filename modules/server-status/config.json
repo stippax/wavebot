@@ -1,0 +1,30 @@
+{
+  "panelChannelId": "1513565299683754014",
+  "cityName": "WAVE\u2122 ROLEPLAY",
+  "subtitle": "Acompanhe o status da cidade em tempo real e use os atalhos abaixo para conectar, visitar nossas redes ou acessar a loja.",
+  "statusLabel": "ONLINE",
+  "ipLabel": "IP FiveM",
+  "serverIp": "connect wave.gg",
+  "websiteLabel": "Nosso website",
+  "website": "godsgroup.com.br",
+  "updateText": "Atualizando a cada 1 minuto",
+  "timezone": "America/Sao_Paulo",
+  "bannerUrl": "https://media.discordapp.net/attachments/1513993233812820162/1513995484820148244/allowlist.png",
+  "thumbnailUrl": "https://media.discordapp.net/attachments/1513993233812820162/1514005804926243017/188.png",
+  "statusColor": "#57f287",
+  "accentColor": "#ff8c1a",
+  "buttons": [
+    {
+      "label": "🔶 Conectar no Servidor",
+      "url": "https://cfx.re/join/wave"
+    },
+    {
+      "label": "🔶 Instagram",
+      "url": "https://www.instagram.com/"
+    },
+    {
+      "label": "🔶 Loja",
+      "url": "https://waverp.gg/loja"
+    }
+  ]
+}

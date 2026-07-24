@@ -1,0 +1,14 @@
+{
+  "panelChannelId": "1513563252116946996",
+  "description": "Bem-vindo a WAVE. Para continuar sua estadia em nossa cidade, voce precisa liberar seu passaporte pela allowlist. O processo e rapido: informe seu nome e token para continuar pelo site.",
+  "footerText": "O bot valida seu token no banco da cidade e libera o acesso ao formulario da allowlist.",
+  "buttonLabel": "🔷 Iniciar Allowlist",
+  "allowlistUrl": "http://localhost:3000/allowlist",
+  "bannerUrl": "https://media.discordapp.net/attachments/1513993233812820162/1513995484820148244/allowlist.png",
+  "accentColor": "#ff8c1a",
+  "mysqlTable": "accounts",
+  "tokenColumn": "Token",
+  "whitelistColumn": "Whitelist",
+  "discordColumn": "Discord",
+  "idColumn": "id"
+}
