@@ -142,16 +142,6 @@ function buildJoinEmbed(member, inviter, invite, config) {
       iconURL: member.user.displayAvatarURL({ size: 128 })
     })
     .setDescription(`${member} acabou de entrar a bordo, convidado por ${inviterText}.`)
-    .addFields(
-      { name: "Novo membro", value: `${member.user.tag}\n\`${member.id}\``, inline: true },
-      {
-        name: "Quem convidou",
-        value: inviter
-          ? `${inviter.user.tag}\n\`${inviter.id}\``
-          : (invite?.inviterId ? `${inviterMention}\n\`${invite.inviterId}\`` : "Nao identificado"),
-        inline: true
-      }
-    )
     .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
     .setFooter({
       text: inviteUse === null

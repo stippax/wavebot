@@ -12,6 +12,7 @@ const {
 } = require("discord.js");
 
 const DEFAULT_COMMAND_NAME = "punicao";
+const REMOVE_COMMAND_NAME = "removerpunicao";
 const PUNISHMENTS_TABLE = "bot_punishments";
 const DEFAULT_EXPIRATION_DAYS = 7;
 const DEFAULT_CHECK_INTERVAL_MINUTES = 60;
@@ -173,6 +174,22 @@ async function updatePunishmentStatus(storage, id, status) {
   }
 }
 
+async function findActivePunishment(storage, guildId, userId) {
+  const { data, error } = await storage
+    .from(PUNISHMENTS_TABLE)
+    .select("id,guild_id,user_id,role_id,expires_at")
+    .eq("guild_id", guildId)
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
 function buildCommand(config) {
   return new SlashCommandBuilder()
     .setName(config.commandName)
@@ -197,6 +214,25 @@ function buildCommand(config) {
     });
 }
 
+function buildRemoveCommand() {
+  return new SlashCommandBuilder()
+    .setName(REMOVE_COMMAND_NAME)
+    .setDescription("Remove a punicao ativa de um membro.")
+    .addUserOption((option) =>
+      option
+        .setName("membro")
+        .setDescription("Membro que tera a punicao removida.")
+        .setRequired(true)
+    )
+    .addStringOption((option) =>
+      option
+        .setName("motivo")
+        .setDescription("Motivo da remocao da punicao.")
+        .setMaxLength(300)
+        .setRequired(true)
+    );
+}
+
 function getCommands(config) {
   const resolvedConfig = resolveConfig(config);
 
@@ -204,10 +240,10 @@ function getCommands(config) {
     return [];
   }
 
-  return [{
-    command: buildCommand(resolvedConfig).toJSON(),
+  return [buildCommand(resolvedConfig), buildRemoveCommand()].map((command) => ({
+    command: command.toJSON(),
     guildId: resolvedConfig.guildId
-  }];
+  }));
 }
 
 function canPunish(interaction, config) {
@@ -261,7 +297,7 @@ function buildLogCard(config, payload) {
           new TextDisplayBuilder().setContent(
             payload.exonerated
               ? `**${payload.targetUser.tag}** chegou ao limite de advertencias e foi expulso do servidor.`
-              : `${payload.targetUser} recebeu a advertencia **${payload.newLevel}**.`
+              : `${payload.targetUser} recebeu a advertencia **${payload.newLevel}** pelo motivo **${payload.reason}**.`
           )
         )
         .setThumbnailAccessory(
@@ -303,6 +339,27 @@ async function sendLog(interaction, config, payload) {
   });
 
   return true;
+}
+
+async function sendRemovalLog(interaction, config, payload) {
+  if (!config.logChannelId) {
+    return;
+  }
+
+  const channel = interaction.guild.channels.cache.get(config.logChannelId)
+    || await interaction.guild.channels.fetch(config.logChannelId).catch(() => null);
+
+  if (!channel?.isTextBased()) {
+    return;
+  }
+
+  await channel.send({
+    content: [
+      `A punicao de ${payload.targetUser} foi removida por ${payload.moderator}.`,
+      `**Motivo:** ${payload.reason}`,
+      `**Data:** <t:${Math.floor(Date.now() / 1000)}:F>`
+    ].join("\n")
+  });
 }
 
 function errorMessage(error) {
@@ -427,7 +484,7 @@ async function handleCommand(interaction, storage, config) {
         console.error("[punishments] Membro exonerado, mas o historico nao foi salvo.", error);
       });
 
-      const logged = await sendLog(interaction, config, {
+      await sendLog(interaction, config, {
         exonerated: true,
         moderator: interaction.user,
         previousLevel,
@@ -438,7 +495,7 @@ async function handleCommand(interaction, storage, config) {
         return false;
       });
 
-      await interaction.editReply(`**${targetUser.tag}** foi exonerado e expulso do servidor.${logged ? " O registro foi enviado ao canal de punicoes." : ""}`);
+      await interaction.deleteReply();
       return;
     }
 
@@ -483,7 +540,7 @@ async function handleCommand(interaction, storage, config) {
       throw error;
     }
 
-    const logged = await sendLog(interaction, config, {
+    await sendLog(interaction, config, {
       exonerated: false,
       moderator: interaction.user,
       newLevel: nextLevel.name,
@@ -496,11 +553,122 @@ async function handleCommand(interaction, storage, config) {
       return false;
     });
 
-    const expirationTimestamp = Math.floor(Date.parse(expiresAt) / 1000);
-    await interaction.editReply(`${targetUser} recebeu **${nextLevel.name}** pelo motivo **${reason.label}**. A punicao expira <t:${expirationTimestamp}:R>.${logged ? " O registro foi enviado ao canal de punicoes." : ""}`);
+    await interaction.deleteReply();
   } catch (error) {
     console.error("[punishments] Falha ao aplicar punicao.", error);
     await interaction.editReply(errorMessage(error)).catch(() => {});
+  } finally {
+    memberLocks.delete(lockKey);
+  }
+}
+
+async function handleRemoveCommand(interaction, storage, config) {
+  if (!interaction.inGuild()) {
+    await interaction.reply({ content: "Este comando so pode ser usado dentro de um servidor.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (!canPunish(interaction, config)) {
+    await interaction.reply({ content: "Voce nao tem permissao para remover punicoes.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  if (!storage) {
+    await interaction.reply({
+      content: "O armazenamento de punicoes nao esta configurado. Defina SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const targetUser = interaction.options.getUser("membro", true);
+  const reason = interaction.options.getString("motivo", true).trim();
+  const lockKey = `${interaction.guildId}:${targetUser.id}`;
+
+  if (memberLocks.has(lockKey)) {
+    await interaction.reply({ content: "Ja existe uma alteracao sendo processada para esse membro.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  memberLocks.add(lockKey);
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  try {
+    const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+
+    if (!targetMember) {
+      await interaction.editReply("Esse membro nao esta mais no servidor.");
+      return;
+    }
+
+    const moderatorMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+
+    if (
+      !moderatorMember
+      || (
+        moderatorMember.id !== interaction.guild.ownerId
+        && targetMember.roles.highest.comparePositionTo(moderatorMember.roles.highest) >= 0
+      )
+    ) {
+      await interaction.editReply("Voce so pode remover punicoes de membros abaixo do seu cargo mais alto.");
+      return;
+    }
+
+    const me = interaction.guild.members.me || await interaction.guild.members.fetchMe().catch(() => null);
+
+    if (!me?.permissions.has(PermissionFlagsBits.ManageRoles)) {
+      await interaction.editReply("O bot precisa da permissao Gerenciar Cargos para remover punicoes.");
+      return;
+    }
+
+    const levels = await resolveConfiguredRoles(interaction.guild, config);
+    const warningRoles = levels
+      .map((level) => level.role)
+      .filter((role) => targetMember.roles.cache.has(role.id));
+    const activeRecord = await findActivePunishment(storage, interaction.guildId, targetUser.id);
+
+    if (!warningRoles.length && !activeRecord) {
+      await interaction.editReply("Esse membro nao possui uma punicao ativa.");
+      return;
+    }
+
+    if (warningRoles.some((role) => !role.editable)) {
+      await interaction.editReply("O bot nao consegue remover um dos cargos de punicao. Confira a hierarquia de cargos.");
+      return;
+    }
+
+    const auditReason = `Punicao removida por ${interaction.user.tag}: ${reason}`.slice(0, 512);
+
+    if (warningRoles.length) {
+      await targetMember.roles.remove(warningRoles, auditReason);
+    }
+
+    try {
+      if (activeRecord) {
+        await updatePunishmentStatus(storage, activeRecord.id, "removed_manually");
+      }
+    } catch (error) {
+      if (warningRoles.length) {
+        await targetMember.roles.add(warningRoles, "Reversao de uma remocao de punicao incompleta").catch((rollbackError) => {
+          console.error("[punishments] Falha ao restaurar cargos apos erro no banco.", rollbackError);
+        });
+      }
+
+      throw error;
+    }
+
+    await sendRemovalLog(interaction, config, {
+      moderator: interaction.user,
+      reason,
+      targetUser
+    }).catch((error) => {
+      console.error("[punishments] Falha ao registrar remocao de punicao.", error);
+    });
+
+    await interaction.deleteReply();
+  } catch (error) {
+    console.error("[punishments] Falha ao remover punicao.", error);
+    await interaction.editReply("Nao foi possivel remover a punicao agora.").catch(() => {});
   } finally {
     memberLocks.delete(lockKey);
   }
@@ -617,6 +785,45 @@ async function sweepPunishments(client, storage, config) {
   }
 }
 
+async function handleManualRoleRemoval(client, storage, config, oldMember, newMember) {
+  if (!storage || (config.guildId && newMember.guild.id !== config.guildId)) {
+    return;
+  }
+
+  const warningRoleIds = config.levels.map((level) => level.roleId).filter(Boolean);
+  const removedWarningRole = warningRoleIds.some((roleId) => (
+    oldMember.roles.cache.has(roleId) && !newMember.roles.cache.has(roleId)
+  ));
+  const stillHasWarningRole = warningRoleIds.some((roleId) => newMember.roles.cache.has(roleId));
+
+  if (!removedWarningRole || stillHasWarningRole) {
+    return;
+  }
+
+  const lockKey = `${newMember.guild.id}:${newMember.id}`;
+
+  if (memberLocks.has(lockKey)) {
+    return;
+  }
+
+  memberLocks.add(lockKey);
+
+  try {
+    const activeRecord = await findActivePunishment(storage, newMember.guild.id, newMember.id);
+
+    if (!activeRecord) {
+      return;
+    }
+
+    await updatePunishmentStatus(storage, activeRecord.id, "removed_manually");
+    await sendExpirationLog(client, config, activeRecord, "removed_manually").catch((error) => {
+      console.error("[punishments] Falha ao registrar remocao manual de cargo.", error);
+    });
+  } finally {
+    memberLocks.delete(lockKey);
+  }
+}
+
 async function register({ client, config }) {
   const resolvedConfig = resolveConfig(config);
   const storage = createStorage();
@@ -637,7 +844,10 @@ async function register({ client, config }) {
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
-    if (!interaction.isChatInputCommand() || interaction.commandName !== resolvedConfig.commandName) {
+    if (
+      !interaction.isChatInputCommand()
+      || ![resolvedConfig.commandName, REMOVE_COMMAND_NAME].includes(interaction.commandName)
+    ) {
       return;
     }
 
@@ -645,12 +855,22 @@ async function register({ client, config }) {
       return;
     }
 
-    await handleCommand(interaction, storage, resolvedConfig).catch(async (error) => {
+    const handler = interaction.commandName === REMOVE_COMMAND_NAME
+      ? handleRemoveCommand
+      : handleCommand;
+
+    await handler(interaction, storage, resolvedConfig).catch(async (error) => {
       console.error("[punishments] Erro inesperado no comando.", error);
 
       if (!interaction.replied && !interaction.deferred) {
-        await interaction.reply({ content: "Nao foi possivel aplicar a punicao agora.", flags: MessageFlags.Ephemeral }).catch(() => {});
+        await interaction.reply({ content: "Nao foi possivel processar a punicao agora.", flags: MessageFlags.Ephemeral }).catch(() => {});
       }
+    });
+  });
+
+  client.on(Events.GuildMemberUpdate, (oldMember, newMember) => {
+    void handleManualRoleRemoval(client, storage, resolvedConfig, oldMember, newMember).catch((error) => {
+      console.error("[punishments] Falha ao sincronizar remocao manual de cargo.", error);
     });
   });
 }
