@@ -705,7 +705,7 @@ async function handleRemoveCommand(interaction, storage, config) {
 }
 
 async function sendExpirationLog(client, config, record, status) {
-  if (!config.logChannelId) {
+  if (!config.logChannelId || status === "member_left") {
     return;
   }
 
@@ -718,7 +718,6 @@ async function sendExpirationLog(client, config, record, status) {
 
   const descriptions = {
     expired: `A punicao de <@${record.user_id}> expirou e foi encerrada.`,
-    member_left: `A punicao de <@${record.user_id}> foi encerrada porque o membro nao esta mais no servidor.`,
     removed_manually: `A punicao de <@${record.user_id}> foi encerrada porque o cargo foi removido manualmente.`
   };
 
@@ -750,21 +749,6 @@ async function applyStoredPunishmentRole(member, levels, record) {
   }
 
   return needsStoredRole || obsoleteRoles.length > 0;
-}
-
-async function sendRestorationLog(client, config, record) {
-  if (!config.logChannelId) {
-    return;
-  }
-
-  const channel = client.channels.cache.get(config.logChannelId)
-    || await client.channels.fetch(config.logChannelId).catch(() => null);
-
-  if (channel?.isTextBased()) {
-    await channel.send({
-      content: `A punicao ativa de <@${record.user_id}> foi reaplicada apos o membro retornar ao servidor.`
-    });
-  }
 }
 
 async function restorePunishmentOnJoin(client, storage, config, member) {
@@ -800,13 +784,7 @@ async function restorePunishmentOnJoin(client, storage, config, member) {
     }
 
     const levels = await resolveConfiguredRoles(member.guild, config);
-    const restored = await applyStoredPunishmentRole(member, levels, record);
-
-    if (restored) {
-      await sendRestorationLog(client, config, record).catch((error) => {
-        console.error("[punishments] Falha ao registrar reaplicacao de cargo.", error);
-      });
-    }
+    await applyStoredPunishmentRole(member, levels, record);
   } finally {
     memberLocks.delete(lockKey);
   }
@@ -855,11 +833,7 @@ async function processActivePunishment(client, storage, config, levels, record) 
     const currentWarningRoles = configuredRoleIds.filter((roleId) => member.roles.cache.has(roleId));
 
     if (!isExpired) {
-      const restored = await applyStoredPunishmentRole(member, levels, record);
-
-      if (restored) {
-        await sendRestorationLog(client, config, record).catch(() => {});
-      }
+      await applyStoredPunishmentRole(member, levels, record);
 
       return;
     }
@@ -877,7 +851,7 @@ async function processActivePunishment(client, storage, config, levels, record) 
   }
 }
 
-async function sweepPunishments(client, storage, config) {
+async function sweepPunishments(client, storage, config, syncActiveRoles = false) {
   const guild = client.guilds.cache.get(config.guildId)
     || await client.guilds.fetch(config.guildId).catch(() => null);
 
@@ -886,11 +860,17 @@ async function sweepPunishments(client, storage, config) {
   }
 
   const levels = await resolveConfiguredRoles(guild, config);
-  const { data, error } = await storage
+  let query = storage
     .from(PUNISHMENTS_TABLE)
     .select("id,guild_id,user_id,role_id,expires_at")
     .eq("guild_id", config.guildId)
-    .eq("status", "active")
+    .eq("status", "active");
+
+  if (!syncActiveRoles) {
+    query = query.lte("expires_at", new Date().toISOString());
+  }
+
+  const { data, error } = await query
     .order("expires_at", { ascending: true })
     .limit(500);
 
@@ -954,12 +934,26 @@ async function register({ client, config }) {
       return;
     }
 
-    const sweep = () => sweepPunishments(client, storage, resolvedConfig).catch((error) => {
-      console.error("[punishments] Falha na verificacao de expiracoes.", error);
-    });
+    let sweepInProgress = false;
 
-    await sweep();
-    const interval = setInterval(sweep, resolvedConfig.expirationCheckIntervalMs);
+    const sweep = async (syncActiveRoles = false) => {
+      if (sweepInProgress) {
+        return;
+      }
+
+      sweepInProgress = true;
+
+      try {
+        await sweepPunishments(client, storage, resolvedConfig, syncActiveRoles);
+      } catch (error) {
+        console.error("[punishments] Falha na verificacao de expiracoes.", error);
+      } finally {
+        sweepInProgress = false;
+      }
+    };
+
+    await sweep(true);
+    const interval = setInterval(() => void sweep(false), resolvedConfig.expirationCheckIntervalMs);
     interval.unref();
   });
 

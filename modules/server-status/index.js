@@ -213,7 +213,8 @@ async function fetchPanelMessage(client, config) {
     return null;
   }
 
-  const channel = await client.channels.fetch(config.panelChannelId).catch(() => null);
+  const channel = client.channels.cache.get(config.panelChannelId)
+    || await client.channels.fetch(config.panelChannelId).catch(() => null);
 
   if (!channel || !channel.isTextBased()) {
     console.warn(`[server-status] Canal de painel invalido: ${config.panelChannelId}.`);
@@ -233,25 +234,36 @@ async function fetchPanelMessage(client, config) {
 }
 
 async function updatePanel(client, config, state) {
-  if (!state.message) {
-    state.message = await fetchPanelMessage(client, config);
-  }
-
-  if (!state.message) {
+  if (state.updating) {
     return;
   }
 
-  state.message = await state.message.edit(buildPayload(config)).catch(async (error) => {
-    console.error("[server-status] Falha ao atualizar painel de status.", error);
-    return fetchPanelMessage(client, config);
-  });
+  state.updating = true;
+
+  try {
+    if (!state.message) {
+      state.message = await fetchPanelMessage(client, config);
+    }
+
+    if (!state.message) {
+      return;
+    }
+
+    state.message = await state.message.edit(buildPayload(config)).catch(async (error) => {
+      console.error("[server-status] Falha ao atualizar painel de status.", error);
+      return fetchPanelMessage(client, config);
+    });
+  } finally {
+    state.updating = false;
+  }
 }
 
 async function register({ client, config }) {
   const resolvedConfig = resolveConfig(config);
   const state = {
     interval: null,
-    message: null
+    message: null,
+    updating: false
   };
 
   client.once(Events.ClientReady, async () => {
@@ -264,6 +276,7 @@ async function register({ client, config }) {
         console.error("[server-status] Falha ao atualizar painel de status.", error);
       });
     }, UPDATE_INTERVAL_MS);
+    state.interval.unref?.();
   });
 }
 

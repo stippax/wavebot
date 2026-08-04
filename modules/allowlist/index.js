@@ -221,7 +221,8 @@ async function ensurePanel(client, config) {
     return;
   }
 
-  const channel = await client.channels.fetch(config.panelChannelId).catch(() => null);
+  const channel = client.channels.cache.get(config.panelChannelId)
+    || await client.channels.fetch(config.panelChannelId).catch(() => null);
 
   if (!channel || !channel.isTextBased()) {
     console.warn(`[allowlist] Canal de painel invalido: ${config.panelChannelId}.`);

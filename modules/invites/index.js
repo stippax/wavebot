@@ -158,7 +158,8 @@ async function sendJoinLog(client, member, inviter, invite, config) {
   }
 
   try {
-    const channel = await client.channels.fetch(config.logChannelId);
+    const channel = client.channels.cache.get(config.logChannelId)
+      || await client.channels.fetch(config.logChannelId);
 
     if (!channel?.isTextBased()) {
       console.warn(`[invites] Canal de log ${config.logChannelId} invalido.`);

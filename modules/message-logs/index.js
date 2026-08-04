@@ -61,7 +61,8 @@ async function resolveLogChannel(client, settings) {
   }
 
   try {
-    const channel = await client.channels.fetch(settings.logChannelId);
+    const channel = client.channels.cache.get(settings.logChannelId)
+      || await client.channels.fetch(settings.logChannelId);
     return channel && channel.isTextBased() ? channel : null;
   } catch {
     return null;

@@ -68,7 +68,8 @@ async function sendLog(client, guild, component, config, type) {
   }
 
   try {
-    const channel = await client.channels.fetch(channelId);
+    const channel = client.channels.cache.get(channelId)
+      || await client.channels.fetch(channelId);
 
     if (!channel || !channel.isTextBased()) {
       console.warn(`[member-logs] Canal ${channelId} invalido ou nao suporta mensagens.`);

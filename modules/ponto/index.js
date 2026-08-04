@@ -877,14 +877,26 @@ async function autoCloseExpiredSessions({ client, state, storage, config }) {
 }
 
 function startAutoCloseSweep({ client, state, storage, config }) {
-  const runSweep = () => {
-    autoCloseExpiredSessions({ client, state, storage, config }).catch((error) => {
+  let sweepInProgress = false;
+
+  const runSweep = async () => {
+    if (sweepInProgress) {
+      return;
+    }
+
+    sweepInProgress = true;
+
+    try {
+      await autoCloseExpiredSessions({ client, state, storage, config });
+    } catch (error) {
       console.error("[ponto] Falha na varredura de fechamento automatico.", error);
-    });
+    } finally {
+      sweepInProgress = false;
+    }
   };
 
-  runSweep();
-  const interval = setInterval(runSweep, AUTO_CLOSE_SWEEP_INTERVAL_MS);
+  void runSweep();
+  const interval = setInterval(() => void runSweep(), AUTO_CLOSE_SWEEP_INTERVAL_MS);
   interval.unref?.();
 }
 

@@ -455,7 +455,8 @@ async function ensurePanel(client, config) {
     return;
   }
 
-  const channel = await client.channels.fetch(config.panelChannelId).catch(() => null);
+  const channel = client.channels.cache.get(config.panelChannelId)
+    || await client.channels.fetch(config.panelChannelId).catch(() => null);
 
   if (!channel || !channel.isTextBased()) {
     console.warn(`[tickets] Canal de painel invalido: ${config.panelChannelId}.`);
@@ -485,7 +486,8 @@ async function sendTicketLog(client, guild, config, payload) {
     return;
   }
 
-  const channel = await client.channels.fetch(config.ticketLogChannelId).catch(() => null);
+  const channel = client.channels.cache.get(config.ticketLogChannelId)
+    || await client.channels.fetch(config.ticketLogChannelId).catch(() => null);
 
   if (!channel || !channel.isTextBased() || channel.guild?.id !== guild.id) {
     return;
@@ -636,9 +638,7 @@ async function notifyTranscriptMembers(client, guild, transcript, password, url)
 }
 
 async function findOpenTicket(guild, userId, config) {
-  const channels = await guild.channels.fetch();
-
-  return channels.find((channel) =>
+  return guild.channels.cache.find((channel) =>
     channel &&
     channel.parentId === config.categoryId &&
     channel.type === ChannelType.GuildText &&
