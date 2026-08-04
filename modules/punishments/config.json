@@ -1,8 +1,8 @@
 {
-  "guildId": "1360404859697758318",
+  "guildId": "1513563251315576863",
   "commandName": "punicao",
-  "logChannelId": "1534015617214971975",
-  "staffRoleIds": ["1360405316583559258"],
+  "logChannelId": "1534326084491940082",
+  "staffRoleIds": ["1514385812983119944"],
   "expirationDays": 7,
   "expirationCheckMinutes": 60,
   "accentColor": "#f1c40f",
