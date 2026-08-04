@@ -159,7 +159,7 @@ async function recordExoneration(storage, payload) {
   }
 }
 
-async function updatePunishmentStatus(storage, id, status) {
+async function updatePunishmentStatus(storage, id, status, currentStatuses = ["active"]) {
   const { error } = await storage
     .from(PUNISHMENTS_TABLE)
     .update({
@@ -167,7 +167,7 @@ async function updatePunishmentStatus(storage, id, status) {
       removed_at: new Date().toISOString()
     })
     .eq("id", id)
-    .eq("status", "active");
+    .in("status", currentStatuses);
 
   if (error) {
     throw error;
@@ -188,6 +188,36 @@ async function findActivePunishment(storage, guildId, userId) {
   }
 
   return data;
+}
+
+async function findRestorablePunishment(storage, guildId, userId) {
+  const { data, error } = await storage
+    .from(PUNISHMENTS_TABLE)
+    .select("id,guild_id,user_id,role_id,expires_at,status,created_at")
+    .eq("guild_id", guildId)
+    .eq("user_id", userId)
+    .in("status", ["active", "member_left"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function reactivatePunishment(storage, id) {
+  const { error } = await storage
+    .from(PUNISHMENTS_TABLE)
+    .update({ status: "active", removed_at: null })
+    .eq("id", id)
+    .eq("status", "member_left");
+
+  if (error) {
+    throw error;
+  }
 }
 
 function buildCommand(config) {
@@ -687,12 +717,99 @@ async function sendExpirationLog(client, config, record, status) {
   }
 
   const descriptions = {
-    expired: `A punicao de <@${record.user_id}> expirou e os cargos de advertencia foram removidos.`,
+    expired: `A punicao de <@${record.user_id}> expirou e foi encerrada.`,
     member_left: `A punicao de <@${record.user_id}> foi encerrada porque o membro nao esta mais no servidor.`,
     removed_manually: `A punicao de <@${record.user_id}> foi encerrada porque o cargo foi removido manualmente.`
   };
 
   await channel.send({ content: descriptions[status] || `A punicao de <@${record.user_id}> foi encerrada.` });
+}
+
+async function applyStoredPunishmentRole(member, levels, record) {
+  const storedLevel = levels.find((level) => level.role.id === record.role_id);
+
+  if (!storedLevel) {
+    throw new Error(`O cargo salvo na punicao ${record.id} nao esta mais configurado.`);
+  }
+
+  if (!storedLevel.role.editable) {
+    throw new Error(`O bot nao consegue reaplicar o cargo ${storedLevel.role.name}.`);
+  }
+
+  const obsoleteRoles = levels
+    .map((level) => level.role)
+    .filter((role) => role.id !== storedLevel.role.id && member.roles.cache.has(role.id));
+  const needsStoredRole = !member.roles.cache.has(storedLevel.role.id);
+
+  if (needsStoredRole) {
+    await member.roles.add(storedLevel.role, "Punicao ativa reaplicada apos retorno ao servidor");
+  }
+
+  if (obsoleteRoles.length) {
+    await member.roles.remove(obsoleteRoles, "Sincronizacao de punicao ativa");
+  }
+
+  return needsStoredRole || obsoleteRoles.length > 0;
+}
+
+async function sendRestorationLog(client, config, record) {
+  if (!config.logChannelId) {
+    return;
+  }
+
+  const channel = client.channels.cache.get(config.logChannelId)
+    || await client.channels.fetch(config.logChannelId).catch(() => null);
+
+  if (channel?.isTextBased()) {
+    await channel.send({
+      content: `A punicao ativa de <@${record.user_id}> foi reaplicada apos o membro retornar ao servidor.`
+    });
+  }
+}
+
+async function restorePunishmentOnJoin(client, storage, config, member) {
+  if (!storage || (config.guildId && member.guild.id !== config.guildId)) {
+    return;
+  }
+
+  const lockKey = `${member.guild.id}:${member.id}`;
+
+  if (memberLocks.has(lockKey)) {
+    return;
+  }
+
+  memberLocks.add(lockKey);
+
+  try {
+    const record = await findRestorablePunishment(storage, member.guild.id, member.id);
+
+    if (!record) {
+      return;
+    }
+
+    const expiresAt = Date.parse(record.expires_at);
+
+    if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+      await updatePunishmentStatus(storage, record.id, "expired", ["active", "member_left"]);
+      await sendExpirationLog(client, config, record, "expired").catch(() => {});
+      return;
+    }
+
+    if (record.status === "member_left") {
+      await reactivatePunishment(storage, record.id);
+    }
+
+    const levels = await resolveConfiguredRoles(member.guild, config);
+    const restored = await applyStoredPunishmentRole(member, levels, record);
+
+    if (restored) {
+      await sendRestorationLog(client, config, record).catch((error) => {
+        console.error("[punishments] Falha ao registrar reaplicacao de cargo.", error);
+      });
+    }
+  } finally {
+    memberLocks.delete(lockKey);
+  }
 }
 
 async function processActivePunishment(client, storage, config, levels, record) {
@@ -706,6 +823,8 @@ async function processActivePunishment(client, storage, config, levels, record) 
 
   try {
     const guild = client.guilds.cache.get(record.guild_id);
+    const expiresAt = Date.parse(record.expires_at);
+    const isExpired = Number.isFinite(expiresAt) && expiresAt <= Date.now();
 
     if (!guild) {
       throw new Error(`Servidor nao esta disponivel no cache: ${record.guild_id}`);
@@ -724,23 +843,24 @@ async function processActivePunishment(client, storage, config, levels, record) 
     }
 
     if (!member) {
-      await updatePunishmentStatus(storage, record.id, "member_left");
-      await sendExpirationLog(client, config, record, "member_left").catch(() => {});
+      if (isExpired) {
+        await updatePunishmentStatus(storage, record.id, "expired");
+        await sendExpirationLog(client, config, record, "expired").catch(() => {});
+      }
+
       return;
     }
 
-    const expiresAt = Date.parse(record.expires_at);
-    const isExpired = Number.isFinite(expiresAt) && expiresAt <= Date.now();
     const configuredRoleIds = levels.map((level) => level.role.id);
     const currentWarningRoles = configuredRoleIds.filter((roleId) => member.roles.cache.has(roleId));
 
-    if (!isExpired && !member.roles.cache.has(record.role_id) && currentWarningRoles.length === 0) {
-      await updatePunishmentStatus(storage, record.id, "removed_manually");
-      await sendExpirationLog(client, config, record, "removed_manually").catch(() => {});
-      return;
-    }
-
     if (!isExpired) {
+      const restored = await applyStoredPunishmentRole(member, levels, record);
+
+      if (restored) {
+        await sendRestorationLog(client, config, record).catch(() => {});
+      }
+
       return;
     }
 
@@ -871,6 +991,12 @@ async function register({ client, config }) {
   client.on(Events.GuildMemberUpdate, (oldMember, newMember) => {
     void handleManualRoleRemoval(client, storage, resolvedConfig, oldMember, newMember).catch((error) => {
       console.error("[punishments] Falha ao sincronizar remocao manual de cargo.", error);
+    });
+  });
+
+  client.on(Events.GuildMemberAdd, (member) => {
+    void restorePunishmentOnJoin(client, storage, resolvedConfig, member).catch((error) => {
+      console.error("[punishments] Falha ao restaurar punicao no retorno do membro.", error);
     });
   });
 }
