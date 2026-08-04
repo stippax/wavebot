@@ -9,16 +9,16 @@
   "exoneratedColor": "#ed4245",
   "levels": [
     {
-      "name": "ADV1",
-      "roleId": "1360405467494613104"
+      "name": "Advertência 1",
+      "roleId": "1534326831648473240"
     },
     {
-      "name": "ADV2",
-      "roleId": "1360405466550636685"
+      "name": "Advertência 2",
+      "roleId": "1534326947205742693"
     },
     {
-      "name": "ADV3",
-      "roleId": "1360405465296670871"
+      "name": "Advertência 3",
+      "roleId": "1534326947981824153"
     }
   ],
   "reasons": [
