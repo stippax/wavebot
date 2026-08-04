@@ -1,6 +1,6 @@
 {
   "panelChannelId": "1513564829393096895",
-  "categoryId": "1513564829393096895",
+  "categoryId": "1513563252116946995",
   "staffRoleId": "1514385812983119944",
   "ticketLogChannelId": "1514385952124960828",
   "transcriptBaseUrl": "https://hipe.studio",
@@ -29,15 +29,31 @@
       "description": "Solicitacões de denúncia.",
       "emoji": "⚠️",
       "channelPrefix": "denúncia",
-      "welcomeMessage": "Explique sua denúncia com todos os detalhes relevantes, incluindo o ID do acusado, QRA do acusado e o motivo da denuncia."
+      "welcomeMessage": "Explique sua denúncia com todos os detalhes relevantes."
     },
     {
-      "value": "Contestacao",
-      "label": "Contestação",
-      "description": "Solicitacões de contestacão.",
-      "emoji": "⚖️",
-      "channelPrefix": "contestacao",
-      "welcomeMessage": "Explique sua contestacão com todos os detalhes relevantes."
+      "value": "duvida",
+      "label": "Dúvida ou Suporte",
+      "description": "Como podemos te ajudar?",
+      "emoji": "❓",
+      "channelPrefix": "duvida",
+      "welcomeMessage": "Explique sua dúvida com todos os detalhes relevantes."
+    },
+    {
+      "value": "loja-vip",
+      "label": "Loja VIP",
+      "description": "Comprou algo em nossa loja ou quer comprar algo e precisa de ajuda?",
+      "emoji": "💎",
+      "channelPrefix": "loja-vip",
+      "welcomeMessage": "Explique sua solicitação com todos os detalhes relevantes."
+    },
+    {
+      "value": "parceria",
+      "label": "Parceria",
+      "description": "Envie sua proprosta de parceria para nossa equipe.",
+      "emoji": "🩵",
+      "channelPrefix": "parceria",
+      "welcomeMessage": "Explique sua solicitação com todos os detalhes relevantes."
     }
   ]
 }
