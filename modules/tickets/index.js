@@ -27,7 +27,6 @@ const LEAVE_TICKET_BUTTON_ID = "tickets:leave";
 const CLAIM_TICKET_BUTTON_ID = "tickets:claim";
 const TRANSFER_TICKET_BUTTON_ID = "tickets:transfer";
 const CONFIRM_CLOSE_WITH_TRANSCRIPT_BUTTON_ID = "tickets:close-with-transcript";
-const CONFIRM_CLOSE_WITHOUT_TRANSCRIPT_BUTTON_ID = "tickets:close-without-transcript";
 const ADD_MEMBER_BUTTON_ID = "tickets:add-member";
 const REMOVE_MEMBER_BUTTON_ID = "tickets:remove-member";
 const ADD_MEMBER_SELECT_ID = "tickets:add-member-select";
@@ -41,7 +40,6 @@ const TICKET_BUTTON_IDS = new Set([
   CLAIM_TICKET_BUTTON_ID,
   TRANSFER_TICKET_BUTTON_ID,
   CONFIRM_CLOSE_WITH_TRANSCRIPT_BUTTON_ID,
-  CONFIRM_CLOSE_WITHOUT_TRANSCRIPT_BUTTON_ID,
   ADD_MEMBER_BUTTON_ID,
   REMOVE_MEMBER_BUTTON_ID
 ]);
@@ -417,12 +415,8 @@ function buildCloseConfirmationComponents() {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(CONFIRM_CLOSE_WITH_TRANSCRIPT_BUTTON_ID)
-        .setLabel("Fechar com Historico")
+        .setLabel("Fechar e Salvar Historico")
         .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId(CONFIRM_CLOSE_WITHOUT_TRANSCRIPT_BUTTON_ID)
-        .setLabel("Fechar sem Historico")
-        .setStyle(ButtonStyle.Danger),
       new ButtonBuilder()
         .setCustomId(STAFF_MENU_BUTTON_ID)
         .setLabel("Voltar")
@@ -567,39 +561,6 @@ function buildTranscriptEmbed({ transcript, password, url, includePassword }) {
 
   if (transcript.closedBy?.avatarUrl) {
     embed.setThumbnail(transcript.closedBy.avatarUrl);
-  }
-
-  return embed;
-}
-
-function buildClosedWithoutTranscriptEmbed({ channelName, ownerTag, ownerId, ownerAvatarUrl, claimedByTag, closedByTag }) {
-  const fields = [
-    { name: "Ticket", value: `#${truncate(channelName, 1000)}`, inline: true },
-    {
-      name: "Aberto por",
-      value: [ownerTag || "Nao encontrado", `ID: ${ownerId || "Nao encontrado"}`].join("\n"),
-      inline: true
-    },
-    { name: "Fechado por", value: closedByTag || "Nao encontrado", inline: true }
-  ];
-
-  if (claimedByTag) {
-    fields.push({
-      name: "Atendido por",
-      value: claimedByTag,
-      inline: true
-    });
-  }
-
-  const embed = new EmbedBuilder()
-    .setColor(0x2b3ed4)
-    .setTitle("Ticket fechado sem historico")
-    .setDescription("Este ticket foi encerrado sem gerar transcript.")
-    .addFields(fields)
-    .setTimestamp(new Date());
-
-  if (ownerAvatarUrl) {
-    embed.setThumbnail(ownerAvatarUrl);
   }
 
   return embed;
@@ -763,9 +724,8 @@ async function createTicket(interaction, config, ticketType) {
   });
 }
 
-async function closeTicket(interaction, client, config, options = {}) {
+async function closeTicket(interaction, client, config) {
   const channel = interaction.channel;
-  const shouldSaveTranscript = options.saveTranscript !== false;
 
   if (!isTicketChannel(channel)) {
     await sendEphemeralResponse(interaction, {
@@ -798,9 +758,7 @@ async function closeTicket(interaction, client, config, options = {}) {
   closingTicketIds.add(channel.id);
 
   const progressMessage = await interaction.followUp({
-    content: shouldSaveTranscript
-      ? "Salvando historico e anexos do ticket. Aguarde..."
-      : "Fechando ticket. Aguarde...",
+    content: "Salvando historico e anexos do ticket. Aguarde...",
     flags: MessageFlags.Ephemeral
   }).catch(() => null);
 
@@ -815,45 +773,22 @@ async function closeTicket(interaction, client, config, options = {}) {
   let transcript;
   let access;
   try {
-    if (shouldSaveTranscript) {
-      transcript = await buildTranscript(channel, getTicketMetadata(channel), interaction.user);
-      access = await saveTranscript(config, transcript);
+    transcript = await buildTranscript(channel, getTicketMetadata(channel), interaction.user);
+    access = await saveTranscript(config, transcript);
 
-      await sendTicketLog(client, interaction.guild, config, {
-        embeds: [
-          buildTranscriptEmbed({
-            transcript,
-            password: access.password,
-            url: access.url,
-            includePassword: true
-          })
-        ],
-        components: access.url ? [buildTranscriptLinkButton(access.url)] : []
-      });
+    await sendTicketLog(client, interaction.guild, config, {
+      embeds: [
+        buildTranscriptEmbed({
+          transcript,
+          password: access.password,
+          url: access.url,
+          includePassword: true
+        })
+      ],
+      components: access.url ? [buildTranscriptLinkButton(access.url)] : []
+    });
 
-      await notifyTranscriptMembers(client, interaction.guild, transcript, access.password, access.url);
-    } else {
-      const metadata = getTicketMetadata(channel);
-      const ownerUser = metadata?.ownerId
-        ? await client.users.fetch(metadata.ownerId).catch(() => null)
-        : null;
-      const claimedByUser = metadata?.claimedById
-        ? await client.users.fetch(metadata.claimedById).catch(() => null)
-        : null;
-
-      await sendTicketLog(client, interaction.guild, config, {
-        embeds: [
-          buildClosedWithoutTranscriptEmbed({
-            channelName: channel.name,
-            ownerTag: ownerUser?.tag || null,
-            ownerId: metadata?.ownerId || null,
-            ownerAvatarUrl: ownerUser?.displayAvatarURL?.({ size: 128 }) || null,
-            claimedByTag: claimedByUser?.tag || null,
-            closedByTag: interaction.user.tag
-          })
-        ]
-      });
-    }
+    await notifyTranscriptMembers(client, interaction.guild, transcript, access.password, access.url);
   } catch (error) {
     console.error("[tickets] Falha ao gerar historico do ticket.", error);
 
@@ -862,11 +797,7 @@ async function closeTicket(interaction, client, config, options = {}) {
     return;
   }
 
-  await updateStatusMessage(
-    shouldSaveTranscript
-      ? "Ticket fechado. O historico foi salvo e este canal sera apagado em 10 segundos."
-      : "Ticket fechado sem gerar historico. Este canal sera apagado em 10 segundos."
-  );
+  await updateStatusMessage("Ticket fechado. O historico foi salvo e este canal sera apagado em 10 segundos.");
 
   setTimeout(async () => {
     await channel.delete("Ticket encerrado").catch((error) => {
@@ -927,7 +858,7 @@ async function promptCloseTicket(interaction, config) {
   }
 
   await sendEphemeralResponse(interaction, {
-    content: "Escolha como deseja fechar este ticket.",
+    content: "Confirme o fechamento deste ticket. O historico sera salvo automaticamente.",
     components: buildCloseConfirmationComponents()
   });
 }
@@ -1446,33 +1377,9 @@ async function register({ client, config }) {
 
     if (interaction.isButton() && interaction.customId === CONFIRM_CLOSE_WITH_TRANSCRIPT_BUTTON_ID) {
       try {
-        await closeTicket(interaction, client, resolvedConfig, { saveTranscript: true });
+        await closeTicket(interaction, client, resolvedConfig);
       } catch (error) {
         console.error("[tickets] Falha ao fechar ticket com historico.", error);
-
-        closingTicketIds.delete(interaction.channelId);
-
-        if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({
-            content: "Nao foi possivel fechar este ticket agora.",
-            flags: MessageFlags.Ephemeral
-          }).catch(() => {});
-        } else {
-          await interaction.reply({
-            content: "Nao foi possivel fechar este ticket agora.",
-            flags: MessageFlags.Ephemeral
-          }).catch(() => {});
-        }
-      }
-
-      return;
-    }
-
-    if (interaction.isButton() && interaction.customId === CONFIRM_CLOSE_WITHOUT_TRANSCRIPT_BUTTON_ID) {
-      try {
-        await closeTicket(interaction, client, resolvedConfig, { saveTranscript: false });
-      } catch (error) {
-        console.error("[tickets] Falha ao fechar ticket sem historico.", error);
 
         closingTicketIds.delete(interaction.channelId);
 

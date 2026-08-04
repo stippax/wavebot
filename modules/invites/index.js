@@ -138,7 +138,7 @@ function buildJoinEmbed(member, inviter, invite, config) {
   return new EmbedBuilder()
     .setColor(config.logColor)
     .setAuthor({
-      name: "Novo membro a bordo!",
+      name: "Novo tripulante a bordo!",
       iconURL: member.user.displayAvatarURL({ size: 128 })
     })
     .setDescription(`${member} acabou de entrar a bordo, convidado por ${inviterText}.`)
