@@ -1,0 +1,126 @@
+{
+  "guildId": "1360404859697758318",
+  "commandName": "punicao",
+  "logChannelId": "1534015617214971975",
+  "staffRoleIds": ["1360405316583559258"],
+  "expirationDays": 7,
+  "expirationCheckMinutes": 60,
+  "accentColor": "#f1c40f",
+  "exoneratedColor": "#ed4245",
+  "levels": [
+    {
+      "name": "ADV1",
+      "roleId": "1360405467494613104"
+    },
+    {
+      "name": "ADV2",
+      "roleId": "1360405466550636685"
+    },
+    {
+      "name": "ADV3",
+      "roleId": "1360405465296670871"
+    }
+  ],
+  "reasons": [
+    {
+      "key": "artigo_1_0",
+      "label": "1.0 - Desrespeito ao Sistema de Comunicação"
+    },
+    {
+      "key": "artigo_1_1",
+      "label": "1.1 - Desvio à Legalidade do Código Penal em Prisões"
+    },
+    {
+      "key": "artigo_1_2",
+      "label": "1.2 - Infração de Jurisprudência"
+    },
+    {
+      "key": "artigo_1_3",
+      "label": "1.3 - Negligência LEVE"
+    },
+    {
+      "key": "artigo_1_4",
+      "label": "1.4 - Nomeações incorretas de cargos e medalhas"
+    },
+    {
+      "key": "artigo_1_5",
+      "label": "1.5 - Omissão de Socorro"
+    },
+    {
+      "key": "artigo_1_6",
+      "label": "1.6 - Quebra das Leis de Trânsito Desnecessariamente"
+    },
+    {
+      "key": "artigo_1_7",
+      "label": "1.7 - Uso de VTR não autorizada"
+    },
+    {
+      "key": "artigo_1_8",
+      "label": "1.8 - Uso indevido de uniformes e aparatos de identificação"
+    },
+    {
+      "key": "artigo_2_0",
+      "label": "2.0 - Abuso de Autoridade"
+    },
+    {
+      "key": "artigo_2_1",
+      "label": "2.1 - Abuso de DV"
+    },
+    {
+      "key": "artigo_2_2",
+      "label": "2.2 - Conduta Desonrosa"
+    },
+    {
+      "key": "artigo_2_3",
+      "label": "2.3 - Denunciação Caluniosa"
+    },
+    {
+      "key": "artigo_2_4",
+      "label": "2.4 - Discriminação e Assédio"
+    },
+    {
+      "key": "artigo_2_5",
+      "label": "2.5 - Insubordinação"
+    },
+    {
+      "key": "artigo_2_6",
+      "label": "2.6 - Má Conduta nas Redes Sociais"
+    },
+    {
+      "key": "artigo_2_7",
+      "label": "2.7 - Quebra de hierarquia"
+    },
+    {
+      "key": "artigo_2_8",
+      "label": "2.8 - Violação das Normas de Segurança"
+    },
+    {
+      "key": "artigo_2_9",
+      "label": "2.9 - Violação no Uso Progressivo da Força"
+    },
+    {
+      "key": "artigo_3_0",
+      "label": "3.0 - Negligência GRAVE"
+    },
+    {
+      "key": "artigo_3_1",
+      "label": "3.1 - Uso Indevido de Informações"
+    },
+    {
+      "key": "artigo_3_2",
+      "label": "3.2 - Corrupção e Propina"
+    },
+    {
+      "key": "artigo_3_3",
+      "label": "3.3 - Discriminação e Assédio"
+    },
+    {
+      "key": "artigo_3_4",
+      "label": "3.4 - Desvio de Recursos Públicos"
+    },
+    {
+      "key": "artigo_3_5",
+      "label": "3.5 - Desvio de Recursos Públicos"
+    }
+  ]
+}
