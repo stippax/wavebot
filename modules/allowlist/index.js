@@ -281,7 +281,16 @@ async function handleAllowlistSubmit(interaction, config) {
     return;
   }
 
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  } catch (error) {
+    if (error.code === 10062) {
+      console.warn("[allowlist] Envio do formulario expirou antes de ser confirmado.");
+      return;
+    }
+
+    throw error;
+  }
 
   try {
     const account = await findAccountByToken(config, token);
@@ -376,7 +385,9 @@ async function register({ client, config }) {
     }
 
     if (interaction.isModalSubmit() && interaction.customId === SUBMIT_MODAL_CUSTOM_ID) {
-      await handleAllowlistSubmit(interaction, resolvedConfig);
+      await handleAllowlistSubmit(interaction, resolvedConfig).catch((error) => {
+        console.error("[allowlist] Falha inesperada ao tratar formulario.", error);
+      });
     }
   });
 }
