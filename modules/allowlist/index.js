@@ -95,9 +95,9 @@ function getPool(config) {
   }
 
   if (!pool) {
-    const connectionConfig = config.mysqlUrl
-      ? { uri: config.mysqlUrl }
-      : config.mysqlConnection;
+    const connectionConfig = hasConnectionParts
+      ? config.mysqlConnection
+      : { uri: config.mysqlUrl };
 
     pool = mysql.createPool({
       ...connectionConfig,
