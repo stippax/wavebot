@@ -58,6 +58,13 @@ function resolveConfig(config) {
     bannerUrl: config.bannerUrl || null,
     accentColor: parseHexColor(config.accentColor, 0xff8c1a),
     mysqlUrl: process.env.ALLOWLIST_MYSQL_URL || process.env.MYSQL_URL || process.env.MYSQL_CONNECTION_STRING || null,
+    mysqlConnection: {
+      host: process.env.ALLOWLIST_DB_HOST || process.env.DB_HOST || null,
+      port: Number(process.env.ALLOWLIST_DB_PORT || process.env.DB_PORT || 3306),
+      user: process.env.ALLOWLIST_DB_USER || process.env.DB_USER || null,
+      password: process.env.ALLOWLIST_DB_PASSWORD || process.env.DB_PASSWORD || "",
+      database: process.env.ALLOWLIST_DB_NAME || process.env.DB_NAME || null
+    },
     mysqlTable: config.mysqlTable || process.env.ALLOWLIST_MYSQL_TABLE || "accounts",
     tokenColumn: config.tokenColumn || process.env.ALLOWLIST_TOKEN_COLUMN || "Token",
     whitelistColumn: config.whitelistColumn || process.env.ALLOWLIST_WHITELIST_COLUMN || "Whitelist",
@@ -67,8 +74,10 @@ function resolveConfig(config) {
 }
 
 function getPool(config) {
-  if (!config.mysqlUrl) {
-    throw new Error("MYSQL_URL nao foi configurada para o modulo allowlist.");
+  const hasConnectionParts = config.mysqlConnection.host && config.mysqlConnection.user && config.mysqlConnection.database;
+
+  if (!config.mysqlUrl && !hasConnectionParts) {
+    throw new Error("Configure MYSQL_URL ou DB_HOST, DB_USER e DB_NAME para o modulo allowlist.");
   }
 
   if (!mysql) {
@@ -80,8 +89,12 @@ function getPool(config) {
   }
 
   if (!pool) {
+    const connectionConfig = config.mysqlUrl
+      ? { uri: config.mysqlUrl }
+      : config.mysqlConnection;
+
     pool = mysql.createPool({
-      uri: config.mysqlUrl,
+      ...connectionConfig,
       flags: ["FOUND_ROWS"]
     });
   }
@@ -244,7 +257,7 @@ async function approveAccount(config, token, discordId) {
   const table = sanitizeIdentifier(config.mysqlTable, "accounts");
   const tokenColumn = sanitizeIdentifier(config.tokenColumn, "Token");
   const whitelistColumn = sanitizeIdentifier(config.whitelistColumn, "Whitelist");
-  const discordColumn = sanitizeIdentifier(config.discordColumn, "discord");
+  const discordColumn = sanitizeIdentifier(config.discordColumn, "Discord");
   const sql = `UPDATE ${table} SET ${discordColumn} = ?, ${whitelistColumn} = 1 WHERE ${tokenColumn} = ? AND ${whitelistColumn} = 0`;
   const [result] = await getPool(config).execute(sql, [discordId, token]);
   return result.affectedRows > 0;
