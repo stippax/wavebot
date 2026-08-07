@@ -166,7 +166,7 @@ function buildAllowlistPanel(config) {
     );
 }
 
-function buildSuccessCard(config, { nome, id }) {
+function buildSuccessCard(config, { nome, id, nicknameUpdated }) {
   const container = new ContainerBuilder()
     .setAccentColor(config.accentColor);
 
@@ -188,7 +188,9 @@ function buildSuccessCard(config, { nome, id }) {
         [
           `Pronto, **${nome}**! Seu passaporte **${id}** foi liberado.`,
           "",
-          "Seu nome no servidor foi atualizado e sua whitelist foi ativada."
+          nicknameUpdated
+            ? "Seu nome no servidor foi atualizado e sua whitelist foi ativada."
+            : "Sua whitelist foi ativada. Nao consegui atualizar seu nome no servidor; procure a equipe se precisar."
         ].join("\n")
       )
     );
@@ -313,30 +315,26 @@ async function handleAllowlistSubmit(interaction, config) {
 
     const nickname = `${nome} | ${account.playerId}`;
 
-    if (nickname.length > 32) {
-      await interaction.editReply("O nome informado e muito longo. Use um nome menor e tente novamente.");
-      return;
-    }
-
     let member = interaction.member;
 
     if (!member?.setNickname && interaction.guild) {
       member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
     }
 
-    if (!member?.manageable) {
-      await interaction.editReply("Nao consegui alterar seu nome. Verifique se o cargo do bot esta acima do seu e tente novamente.");
-      return;
-    }
+    const previousNickname = member?.nickname ?? null;
+    let nicknameUpdated = false;
 
-    const previousNickname = member.nickname;
-
-    try {
-      await member.setNickname(nickname, "Allowlist aprovada");
-    } catch (error) {
-      console.warn("[allowlist] Falha ao renomear membro.", error);
-      await interaction.editReply("Nao consegui alterar seu nome. Tente novamente ou procure a equipe.");
-      return;
+    if (nickname.length > 32) {
+      console.warn("[allowlist] Nome muito longo; liberando whitelist sem alterar apelido.");
+    } else if (!member?.manageable) {
+      console.warn("[allowlist] Membro nao gerenciavel; liberando whitelist sem alterar apelido.");
+    } else {
+      try {
+        await member.setNickname(nickname, "Allowlist aprovada");
+        nicknameUpdated = true;
+      } catch (error) {
+        console.warn("[allowlist] Falha ao renomear membro; liberando whitelist mesmo assim.", error);
+      }
     }
 
     let saved;
@@ -344,12 +342,16 @@ async function handleAllowlistSubmit(interaction, config) {
     try {
       saved = await approveAccount(config, token, interaction.user.id);
     } catch (error) {
-      await member.setNickname(previousNickname, "Falha ao liberar allowlist").catch(() => null);
+      if (nicknameUpdated) {
+        await member.setNickname(previousNickname, "Falha ao liberar allowlist").catch(() => null);
+      }
       throw error;
     }
 
     if (!saved) {
-      await member.setNickname(previousNickname, "Token ja utilizado").catch(() => null);
+      if (nicknameUpdated) {
+        await member.setNickname(previousNickname, "Token ja utilizado").catch(() => null);
+      }
       await interaction.editReply("Este token ja foi liberado.");
       return;
     }
@@ -358,7 +360,8 @@ async function handleAllowlistSubmit(interaction, config) {
       components: [
         buildSuccessCard(config, {
           nome,
-          id: account.playerId
+          id: account.playerId,
+          nicknameUpdated
         })
       ],
       flags: MessageFlags.IsComponentsV2
