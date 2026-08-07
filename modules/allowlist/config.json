@@ -3,7 +3,7 @@
   "description": "Bem-vindo a WAVE. Informe seu nome e token para liberar seu acesso a cidade.",
   "footerText": "O bot valida seus dados, atualiza seu nome e libera sua whitelist automaticamente.",
   "buttonLabel": "🔷 Iniciar Allowlist",
-  "bannerUrl": "https://cdn.hipe.studio/assets/wave/wave-bot.png",
+  "bannerUrl": "https://cdn.hipe.studio/assets/wave/wave-banner.png",
   "accentColor": "#1fa1ff",
   "mysqlTable": "accounts",
   "tokenColumn": "Token",
