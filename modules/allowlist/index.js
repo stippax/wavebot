@@ -52,10 +52,9 @@ function parseHexColor(value, fallback) {
 function resolveConfig(config) {
   return {
     panelChannelId: isSnowflake(config.panelChannelId) ? config.panelChannelId : null,
-    description: config.description || "Bem-vindo a WAVE. Para continuar sua estadia em nossa cidade, voce precisa liberar seu passaporte pela allowlist.",
-    footerText: config.footerText || "A allowlist e feita pelo nosso site e pode ser aprovada automaticamente quando voce acertar a maioria das perguntas sobre as regras da cidade.",
+    description: config.description || "Bem-vindo a WAVE. Informe seu nome e token para liberar seu acesso a cidade.",
+    footerText: config.footerText || "O bot valida seus dados, atualiza seu nome e libera sua whitelist automaticamente.",
     buttonLabel: config.buttonLabel || "🔶 Iniciar Allowlist",
-    allowlistUrl: config.allowlistUrl || "http://localhost:3000/allowlist",
     bannerUrl: config.bannerUrl || null,
     accentColor: parseHexColor(config.accentColor, 0xff8c1a),
     mysqlUrl: process.env.ALLOWLIST_MYSQL_URL || process.env.MYSQL_URL || process.env.MYSQL_CONNECTION_STRING || null,
@@ -88,14 +87,6 @@ function getPool(config) {
   }
 
   return pool;
-}
-
-function buildAllowlistUrl(config, { token, nome, id }) {
-  const url = new URL(config.allowlistUrl);
-  url.searchParams.set("token", token);
-  url.searchParams.set("nome", nome);
-  url.searchParams.set("id", String(id));
-  return url.toString();
 }
 
 function buildAllowlistModal() {
@@ -155,7 +146,7 @@ function buildAllowlistPanel(config) {
     );
 }
 
-function buildContinueAllowlistCard(config, { nome, token, id, url }) {
+function buildSuccessCard(config, { nome, id }) {
   const container = new ContainerBuilder()
     .setAccentColor(config.accentColor);
 
@@ -175,18 +166,10 @@ function buildContinueAllowlistCard(config, { nome, token, id, url }) {
       new TextDisplayBuilder().setContent("## Token validado"),
       new TextDisplayBuilder().setContent(
         [
-          `Ola, **${nome}**. Encontramos seu cadastro na cidade e vinculamos seu Discord ao seu passaporte.`,
+          `Pronto, **${nome}**! Seu passaporte **${id}** foi liberado.`,
           "",
-          "Clique no botao abaixo para continuar sua allowlist pelo site."
+          "Seu nome no servidor foi atualizado e sua whitelist foi ativada."
         ].join("\n")
-      )
-    )
-    .addActionRowComponents(
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setLabel("🔶 Continuar Allowlist")
-          .setStyle(ButtonStyle.Link)
-          .setURL(url)
       )
     );
 }
@@ -251,18 +234,18 @@ async function findAccountByToken(config, token) {
   const table = sanitizeIdentifier(config.mysqlTable, "accounts");
   const idColumn = sanitizeIdentifier(config.idColumn, "id");
   const tokenColumn = sanitizeIdentifier(config.tokenColumn, "Token");
-  const discordColumn = sanitizeIdentifier(config.discordColumn, "Discord");
-  const sql = `SELECT ${idColumn} AS playerId, ${discordColumn} AS discordId FROM ${table} WHERE ${tokenColumn} = ? LIMIT 1`;
+  const whitelistColumn = sanitizeIdentifier(config.whitelistColumn, "Whitelist");
+  const sql = `SELECT ${idColumn} AS playerId, ${whitelistColumn} AS whitelisted FROM ${table} WHERE ${tokenColumn} = ? LIMIT 1`;
   const [rows] = await getPool(config).execute(sql, [token]);
   return rows[0] || null;
 }
 
-async function saveDiscordId(config, token, discordId) {
+async function approveAccount(config, token, discordId) {
   const table = sanitizeIdentifier(config.mysqlTable, "accounts");
   const tokenColumn = sanitizeIdentifier(config.tokenColumn, "Token");
   const whitelistColumn = sanitizeIdentifier(config.whitelistColumn, "Whitelist");
   const discordColumn = sanitizeIdentifier(config.discordColumn, "discord");
-  const sql = `UPDATE ${table} SET ${discordColumn} = ? WHERE ${tokenColumn} = ? AND ${whitelistColumn} = 0`;
+  const sql = `UPDATE ${table} SET ${discordColumn} = ?, ${whitelistColumn} = 1 WHERE ${tokenColumn} = ? AND ${whitelistColumn} = 0`;
   const [result] = await getPool(config).execute(sql, [discordId, token]);
   return result.affectedRows > 0;
 }
@@ -289,36 +272,59 @@ async function handleAllowlistSubmit(interaction, config) {
       return;
     }
 
-    const saved = await saveDiscordId(config, token, interaction.user.id);
-
-    if (!saved) {
+    if (Number(account.whitelisted) !== 0) {
       await interaction.editReply("Este token ja foi liberado.");
       return;
     }
 
-    const playerId = account.playerId;
-    const nickname = `${nome} | ${playerId}`;
+    const nickname = `${nome} | ${account.playerId}`;
+
+    if (nickname.length > 32) {
+      await interaction.editReply("O nome informado e muito longo. Use um nome menor e tente novamente.");
+      return;
+    }
+
     let member = interaction.member;
 
     if (!member?.setNickname && interaction.guild) {
       member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
     }
 
-    if (member?.manageable) {
-      await member.setNickname(nickname, "Allowlist iniciada").catch((error) => {
-        console.warn("[allowlist] Falha ao renomear membro.", error);
-      });
+    if (!member?.manageable) {
+      await interaction.editReply("Nao consegui alterar seu nome. Verifique se o cargo do bot esta acima do seu e tente novamente.");
+      return;
     }
 
-    const allowlistUrl = buildAllowlistUrl(config, { token, nome, id: playerId });
+    const previousNickname = member.nickname;
+
+    try {
+      await member.setNickname(nickname, "Allowlist aprovada");
+    } catch (error) {
+      console.warn("[allowlist] Falha ao renomear membro.", error);
+      await interaction.editReply("Nao consegui alterar seu nome. Tente novamente ou procure a equipe.");
+      return;
+    }
+
+    let saved;
+
+    try {
+      saved = await approveAccount(config, token, interaction.user.id);
+    } catch (error) {
+      await member.setNickname(previousNickname, "Falha ao liberar allowlist").catch(() => null);
+      throw error;
+    }
+
+    if (!saved) {
+      await member.setNickname(previousNickname, "Token ja utilizado").catch(() => null);
+      await interaction.editReply("Este token ja foi liberado.");
+      return;
+    }
 
     await interaction.editReply({
       components: [
-        buildContinueAllowlistCard(config, {
+        buildSuccessCard(config, {
           nome,
-          token,
-          id: playerId,
-          url: allowlistUrl
+          id: account.playerId
         })
       ],
       flags: MessageFlags.IsComponentsV2
