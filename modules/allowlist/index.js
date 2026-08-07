@@ -101,6 +101,7 @@ function getPool(config) {
 
     pool = mysql.createPool({
       ...connectionConfig,
+      connectTimeout: 10000,
       flags: ["FOUND_ROWS"]
     });
   }
@@ -269,6 +270,11 @@ async function approveAccount(config, token, discordId) {
   return result.affectedRows > 0;
 }
 
+async function verifyDatabaseConnection(config) {
+  await getPool(config).query("SELECT 1");
+  console.log("[allowlist] Conexao MySQL estabelecida.");
+}
+
 async function handleAllowlistSubmit(interaction, config) {
   const nome = interaction.fields.getTextInputValue(NAME_INPUT_CUSTOM_ID).trim();
   const token = interaction.fields.getTextInputValue(TOKEN_INPUT_CUSTOM_ID).trim();
@@ -369,6 +375,10 @@ async function register({ client, config }) {
   client.once(Events.ClientReady, async () => {
     await ensurePanel(client, resolvedConfig).catch((error) => {
       console.error("[allowlist] Falha ao preparar painel de allowlist.", error);
+    });
+
+    await verifyDatabaseConnection(resolvedConfig).catch((error) => {
+      console.error(`[allowlist] Falha ao conectar ao MySQL: ${error.code || error.message}`);
     });
   });
 
