@@ -4,7 +4,7 @@
   "footerText": "O bot valida seus dados, atualiza seu nome e libera sua whitelist automaticamente.",
   "buttonLabel": "🔷 Iniciar Allowlist",
   "bannerUrl": "https://cdn.hipe.studio/assets/wave/wave-bot.png",
-  "accentColor": "#ff8c1a",
+  "accentColor": "#1fa1ff",
   "mysqlTable": "accounts",
   "tokenColumn": "Token",
   "whitelistColumn": "Whitelist",

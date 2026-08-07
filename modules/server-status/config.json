@@ -15,15 +15,15 @@
   "accentColor": "#ff8c1a",
   "buttons": [
     {
-      "label": "🔶 Conectar no Servidor",
+      "label": "💠 Conectar no Servidor",
       "url": "https://cfx.re/join/wave"
     },
     {
-      "label": "🔶 Instagram",
+      "label": "💠 Instagram",
       "url": "https://www.instagram.com/"
     },
     {
-      "label": "🔶 Loja",
+      "label": "💠 Loja",
       "url": "https://waverp.gg/loja"
     }
   ]

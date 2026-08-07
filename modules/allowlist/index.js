@@ -183,14 +183,14 @@ function buildSuccessCard(config, { nome, id, nicknameUpdated }) {
   return container
     .addSeparatorComponents(new SeparatorBuilder())
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent("## Token validado"),
+      new TextDisplayBuilder().setContent("## Bem-vindo à WAVE!"),
       new TextDisplayBuilder().setContent(
         [
           `Pronto, **${nome}**! Seu passaporte **${id}** foi liberado.`,
           "",
           nicknameUpdated
-            ? "Seu nome no servidor foi atualizado e sua whitelist foi ativada."
-            : "Sua whitelist foi ativada. Nao consegui atualizar seu nome no servidor; procure a equipe se precisar."
+            ? "Seus documentos foram atualizados e sua CPF foi gerado."
+            : "Seu documentos foram atualizados. Nao consegui atualizar seu nome na sua identidade; procure a equipe se precisar."
         ].join("\n")
       )
     );
