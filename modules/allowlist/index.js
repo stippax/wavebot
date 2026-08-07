@@ -77,6 +77,12 @@ function getPool(config) {
   const hasConnectionParts = config.mysqlConnection.host && config.mysqlConnection.user && config.mysqlConnection.database;
 
   if (!config.mysqlUrl && !hasConnectionParts) {
+    console.error("[allowlist] Variaveis de banco ausentes.", {
+      hasMysqlUrl: Boolean(config.mysqlUrl),
+      hasDbHost: Boolean(config.mysqlConnection.host),
+      hasDbUser: Boolean(config.mysqlConnection.user),
+      hasDbName: Boolean(config.mysqlConnection.database)
+    });
     throw new Error("Configure MYSQL_URL ou DB_HOST, DB_USER e DB_NAME para o modulo allowlist.");
   }
 
@@ -359,7 +365,13 @@ async function register({ client, config }) {
 
   client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isButton() && interaction.customId === OPEN_MODAL_CUSTOM_ID) {
-      await interaction.showModal(buildAllowlistModal());
+      try {
+        await interaction.showModal(buildAllowlistModal());
+      } catch (error) {
+        if (error.code !== 10062) {
+          console.error("[allowlist] Falha ao abrir modal.", error);
+        }
+      }
       return;
     }
 
