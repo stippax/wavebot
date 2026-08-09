@@ -52,6 +52,7 @@ function parseHexColor(value, fallback) {
 function resolveConfig(config) {
   return {
     panelChannelId: isSnowflake(config.panelChannelId) ? config.panelChannelId : null,
+    approvedRoleId: isSnowflake(config.approvedRoleId) ? config.approvedRoleId : null,
     description: config.description || "Bem-vindo a WAVE. Informe seu nome e token para liberar seu acesso a cidade.",
     footerText: config.footerText || "O bot valida seus dados, atualiza seu nome e libera sua whitelist automaticamente.",
     buttonLabel: config.buttonLabel || "🔶 Iniciar Allowlist",
@@ -196,6 +197,38 @@ function buildSuccessCard(config, { nome, id, nicknameUpdated }) {
     );
 }
 
+async function grantApprovedRole(interaction, config, member) {
+  if (!config.approvedRoleId) {
+    return { granted: false, role: null };
+  }
+
+  if (!interaction.guild) {
+    throw new Error("Servidor indisponivel para entregar o cargo de allowlist.");
+  }
+
+  const role = interaction.guild.roles.cache.get(config.approvedRoleId)
+    || await interaction.guild.roles.fetch(config.approvedRoleId).catch(() => null);
+
+  if (!role) {
+    throw new Error(`Cargo de allowlist nao encontrado: ${config.approvedRoleId}`);
+  }
+
+  if (!role.editable) {
+    throw new Error(`O bot nao consegue entregar o cargo ${role.name}. Confira a hierarquia de cargos.`);
+  }
+
+  if (!member) {
+    throw new Error("Nao consegui validar seu membro no servidor para entregar o cargo.");
+  }
+
+  if (!member.roles.cache.has(role.id)) {
+    await member.roles.add(role, "Allowlist aprovada");
+    return { granted: true, role };
+  }
+
+  return { granted: false, role };
+}
+
 function componentTreeHasCustomId(component, customId) {
   if (!component) {
     return false;
@@ -323,6 +356,8 @@ async function handleAllowlistSubmit(interaction, config) {
 
     const previousNickname = member?.nickname ?? null;
     let nicknameUpdated = false;
+    let grantedRole = null;
+    let roleGranted = false;
 
     if (nickname.length > 32) {
       console.warn("[allowlist] Nome muito longo; liberando whitelist sem alterar apelido.");
@@ -337,6 +372,20 @@ async function handleAllowlistSubmit(interaction, config) {
       }
     }
 
+    try {
+      const roleResult = await grantApprovedRole(interaction, config, member);
+      grantedRole = roleResult.role;
+      roleGranted = roleResult.granted;
+    } catch (error) {
+      if (nicknameUpdated) {
+        await member.setNickname(previousNickname, "Falha ao entregar cargo de allowlist").catch(() => null);
+      }
+
+      console.warn("[allowlist] Falha ao entregar cargo; whitelist nao liberada.", error);
+      await interaction.editReply("Nao consegui entregar o cargo de allowlist. Confira se o cargo configurado existe e esta abaixo do cargo do bot.");
+      return;
+    }
+
     let saved;
 
     try {
@@ -345,12 +394,18 @@ async function handleAllowlistSubmit(interaction, config) {
       if (nicknameUpdated) {
         await member.setNickname(previousNickname, "Falha ao liberar allowlist").catch(() => null);
       }
+      if (roleGranted && grantedRole) {
+        await member.roles.remove(grantedRole, "Falha ao liberar allowlist").catch(() => null);
+      }
       throw error;
     }
 
     if (!saved) {
       if (nicknameUpdated) {
         await member.setNickname(previousNickname, "Token ja utilizado").catch(() => null);
+      }
+      if (roleGranted && grantedRole) {
+        await member.roles.remove(grantedRole, "Token ja utilizado").catch(() => null);
       }
       await interaction.editReply("Este token ja foi liberado.");
       return;
