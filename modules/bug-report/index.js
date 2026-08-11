@@ -6,6 +6,7 @@ const {
 } = require("discord.js");
 
 const COMMAND_NAME = "bug";
+const REPORT_HINT = "Para reportar outro problema, use **/bug** na barra de texto.";
 
 function isSnowflake(value) {
   return typeof value === "string" && /^\d{17,20}$/.test(value);
@@ -26,10 +27,7 @@ function resolveConfig(config) {
   return {
     guildId: isSnowflake(config.guildId) ? config.guildId : null,
     logChannelId: isSnowflake(config.logChannelId) ? config.logChannelId : null,
-    accentColor: parseHexColor(config.accentColor, 0x1fa1ff),
-    footerText: typeof config.footerText === "string" && config.footerText.trim()
-      ? config.footerText.trim().slice(0, 2048)
-      : "Para reportar outro problema, use **/bug** na barra de texto."
+    accentColor: parseHexColor(config.accentColor, 0x1fa1ff)
   };
 }
 
@@ -79,12 +77,11 @@ function buildBugEmbed(interaction, config, cause) {
   return new EmbedBuilder()
     .setColor(config.accentColor)
     .setTitle("🌊 BUG REPORTADO")
-    .setDescription(truncate(cause, 1000))
+    .setDescription(`${truncate(cause, 1000)}\n\n${REPORT_HINT}`)
     .addFields(
       { name: "Enviado por", value: `${interaction.user}`, inline: true },
       { name: "Data", value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true }
-    )
-    .setFooter({ text: config.footerText });
+    );
 }
 
 async function handleBugCommand(interaction, config) {
@@ -108,14 +105,15 @@ async function handleBugCommand(interaction, config) {
 
   const cause = interaction.options.getString("causa", true);
 
+  await interaction.deferReply({
+    flags: MessageFlags.Ephemeral
+  });
+
   await logChannel.send({
     embeds: [buildBugEmbed(interaction, config, cause)]
   });
 
-  await interaction.reply({
-    content: "Bug reportado com sucesso.",
-    flags: MessageFlags.Ephemeral
-  });
+  await interaction.deleteReply().catch(() => {});
 }
 
 async function register({ client, config }) {
