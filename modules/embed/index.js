@@ -1,7 +1,6 @@
 const crypto = require("node:crypto");
 const {
   ActionRowBuilder,
-  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
@@ -10,9 +9,11 @@ const {
   ModalBuilder,
   PermissionFlagsBits,
   SlashCommandBuilder,
+  StringSelectMenuBuilder,
   TextInputBuilder,
   TextInputStyle
 } = require("discord.js");
+const templates = require("./templates");
 
 const COMMAND_NAME = "embed";
 const COMPONENT_PREFIX = "embed-builder";
@@ -22,7 +23,7 @@ function isSnowflake(value) {
   return typeof value === "string" && /^\d{17,20}$/.test(value);
 }
 
-function parseColor(value, fallback = 0x5865f2) {
+function parseColor(value, fallback = 0x1fa1ff) {
   if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 0xffffff) {
     return value;
   }
@@ -52,70 +53,8 @@ function resolveConfig(config) {
 function buildCommand() {
   return new SlashCommandBuilder()
     .setName(COMMAND_NAME)
-    .setDescription("Cria, edita, importa e exporta embeds do bot.")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName("criar")
-        .setDescription("Abre um novo embed builder.")
-        .addChannelOption((option) =>
-          option
-            .setName("canal")
-            .setDescription("Canal onde o embed sera publicado. Padrao: canal atual.")
-        )
-    )
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName("editar")
-        .setDescription("Edita um embed de uma mensagem enviada pelo bot.")
-        .addStringOption((option) =>
-          option
-            .setName("mensagem")
-            .setDescription("Link ou ID da mensagem do bot.")
-            .setRequired(true)
-        )
-        .addIntegerOption((option) =>
-          option
-            .setName("indice")
-            .setDescription("Numero do embed na mensagem. Padrao: 1.")
-            .setMinValue(1)
-            .setMaxValue(10)
-        )
-    )
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName("importar")
-        .setDescription("Abre o builder usando um arquivo JSON exportado.")
-        .addAttachmentOption((option) =>
-          option
-            .setName("arquivo")
-            .setDescription("Arquivo JSON com o embed.")
-            .setRequired(true)
-        )
-        .addChannelOption((option) =>
-          option
-            .setName("canal")
-            .setDescription("Canal onde o embed sera publicado. Padrao: canal atual.")
-        )
-    )
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName("json")
-        .setDescription("Exporta o JSON de um embed publicado.")
-        .addStringOption((option) =>
-          option
-            .setName("mensagem")
-            .setDescription("Link ou ID de uma mensagem publica.")
-            .setRequired(true)
-        )
-        .addIntegerOption((option) =>
-          option
-            .setName("indice")
-            .setDescription("Numero do embed na mensagem. Padrao: 1.")
-            .setMinValue(1)
-            .setMaxValue(10)
-        )
-    );
+    .setDescription("Cria um embed no canal atual.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages);
 }
 
 function getCommands(config) {
@@ -127,162 +66,23 @@ function getCommands(config) {
   }];
 }
 
-function parseMessageReference(value, interaction) {
-  const input = String(value || "").trim();
-  const linkMatch = input.match(/discord(?:app)?\.com\/channels\/(\d{17,20})\/(\d{17,20})\/(\d{17,20})/i);
-
-  if (linkMatch) {
-    if (linkMatch[1] !== interaction.guildId) {
-      return null;
-    }
-
-    return { channelId: linkMatch[2], messageId: linkMatch[3] };
-  }
-
-  const pairMatch = input.match(/^(\d{17,20})[\/-](\d{17,20})$/);
-  if (pairMatch) {
-    return { channelId: pairMatch[1], messageId: pairMatch[2] };
-  }
-
-  if (isSnowflake(input)) {
-    return { channelId: interaction.channelId, messageId: input };
-  }
-
-  return null;
+function componentId(action, sessionId) {
+  return `${COMPONENT_PREFIX}:${action}:${sessionId}`;
 }
 
-async function fetchMessage(interaction, input) {
-  const reference = parseMessageReference(input, interaction);
-
-  if (!reference) {
-    return null;
-  }
-
-  const channel = interaction.guild.channels.cache.get(reference.channelId)
-    || await interaction.guild.channels.fetch(reference.channelId).catch(() => null);
-
-  if (!channel?.isTextBased() || !channel.messages) {
-    return null;
-  }
-
-  return channel.messages.fetch(reference.messageId).catch(() => null);
+function parseComponentId(customId) {
+  const match = String(customId || "").match(/^embed-builder:([a-z]+):([0-9a-f]{16})$/);
+  return match ? { action: match[1], sessionId: match[2] } : null;
 }
 
-function extractEmbedData(value) {
-  let candidate = value;
-
-  if (Array.isArray(candidate)) {
-    [candidate] = candidate;
-  } else if (candidate && Array.isArray(candidate.embeds)) {
-    [candidate] = candidate.embeds;
-  } else if (candidate?.embed && typeof candidate.embed === "object") {
-    candidate = candidate.embed;
-  }
-
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-    throw new Error("O JSON precisa conter um objeto de embed.");
-  }
-
-  const data = new EmbedBuilder(candidate).toJSON();
-  validateEmbed(data);
-  return data;
-}
-
-function validateOptionalString(value, label) {
-  if (value !== undefined && typeof value !== "string") {
-    throw new Error(`${label} precisa ser um texto.`);
-  }
-}
-
-function validateOptionalUrl(value, label) {
-  if (value === undefined) return;
-  validateOptionalString(value, label);
-
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new Error(`${label} precisa ser uma URL valida.`);
-  }
-
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error(`${label} precisa usar http ou https.`);
-  }
-}
-
-function validateEmbed(data) {
-  validateOptionalString(data.title, "O titulo");
-  validateOptionalString(data.description, "A descricao");
-  validateOptionalString(data.author?.name, "O nome do autor");
-  validateOptionalString(data.footer?.text, "O rodape");
-  validateOptionalString(data.timestamp, "A data");
-  validateOptionalUrl(data.url, "O link do titulo");
-  validateOptionalUrl(data.author?.url, "O link do autor");
-  validateOptionalUrl(data.author?.icon_url, "O icone do autor");
-  validateOptionalUrl(data.footer?.icon_url, "O icone do rodape");
-  validateOptionalUrl(data.image?.url, "A imagem principal");
-  validateOptionalUrl(data.thumbnail?.url, "A miniatura");
-
-  if (data.color !== undefined && (!Number.isInteger(data.color) || data.color < 0 || data.color > 0xffffff)) {
-    throw new Error("A cor do embed precisa ser um numero hexadecimal valido.");
-  }
-
-  if (data.fields !== undefined && !Array.isArray(data.fields)) {
-    throw new Error("Os campos do embed precisam estar em uma lista.");
-  }
-
-  const hasVisibleContent = Boolean(
-    data.title
-    || data.description
-    || data.author?.name
-    || data.footer?.text
-    || data.image?.url
-    || data.thumbnail?.url
-    || data.fields?.length
-  );
-
-  if (!hasVisibleContent) {
-    throw new Error("O embed precisa ter algum conteudo visivel.");
-  }
-
-  if (data.title?.length > 256) throw new Error("O titulo pode ter no maximo 256 caracteres.");
-  if (data.description?.length > 4096) throw new Error("A descricao pode ter no maximo 4096 caracteres.");
-  if (data.footer?.text?.length > 2048) throw new Error("O rodape pode ter no maximo 2048 caracteres.");
-  if (data.author?.name?.length > 256) throw new Error("O autor pode ter no maximo 256 caracteres.");
-  if ((data.fields?.length || 0) > 25) throw new Error("Um embed pode ter no maximo 25 campos.");
-
-  let totalLength = (data.title?.length || 0)
-    + (data.description?.length || 0)
-    + (data.footer?.text?.length || 0)
-    + (data.author?.name?.length || 0);
-
-  for (const field of data.fields || []) {
-    if (!field || typeof field !== "object") throw new Error("Um dos campos do embed e invalido.");
-    validateOptionalString(field.name, "O nome do campo");
-    validateOptionalString(field.value, "O valor do campo");
-    if (field.inline !== undefined && typeof field.inline !== "boolean") {
-      throw new Error("A opcao inline de um campo precisa ser true ou false.");
-    }
-    if (!field.name || !field.value) throw new Error("Todo campo precisa ter nome e valor.");
-    if (field.name.length > 256) throw new Error("O nome de um campo passou de 256 caracteres.");
-    if (field.value.length > 1024) throw new Error("O valor de um campo passou de 1024 caracteres.");
-    totalLength += field.name.length + field.value.length;
-  }
-
-  if (totalLength > 6000) {
-    throw new Error("O embed passou do limite total de 6000 caracteres.");
-  }
-}
-
-function createSession(interaction, config, embed, options = {}) {
+function createSession(interaction, config) {
   const id = crypto.randomBytes(8).toString("hex");
   const session = {
     id,
     ownerId: interaction.user.id,
     guildId: interaction.guildId,
-    channelId: options.channelId || interaction.channelId,
-    target: options.target || null,
-    embed,
+    messageId: null,
+    embed: null,
     ttlMs: config.sessionTtlMs,
     expiresAt: Date.now() + config.sessionTtlMs
   };
@@ -296,209 +96,391 @@ function getSession(interaction, sessionId) {
 
   if (!session || session.expiresAt <= Date.now()) {
     sessions.delete(sessionId);
-    return { error: "Este builder expirou. Execute o comando novamente." };
+    return { error: "Este editor expirou. Use /embed novamente." };
   }
 
   if (session.ownerId !== interaction.user.id || session.guildId !== interaction.guildId) {
-    return { error: "Este builder pertence a outro usuario." };
+    return { error: "Este editor pertence a outro usuario." };
   }
 
+  session.expiresAt = Date.now() + session.ttlMs;
   return { session };
 }
 
-function componentId(action, sessionId) {
-  return `${COMPONENT_PREFIX}:${action}:${sessionId}`;
+function cleanEmbed(data) {
+  const embed = { ...data };
+
+  if (!embed.title) delete embed.title;
+  if (!embed.url) delete embed.url;
+  if (!embed.description) delete embed.description;
+  if (!embed.author?.name) delete embed.author;
+  if (!embed.thumbnail?.url) delete embed.thumbnail;
+  if (!embed.image?.url) delete embed.image;
+  if (!embed.fields?.length) delete embed.fields;
+  if (!embed.footer?.text) delete embed.footer;
+  if (!embed.timestamp) delete embed.timestamp;
+  if (!Number.isInteger(embed.color)) delete embed.color;
+
+  return embed;
 }
 
-function parseComponentId(customId) {
-  const match = customId.match(/^embed-builder:([a-z]+):([0-9a-f]{16})$/);
-  return match ? { action: match[1], sessionId: match[2] } : null;
+function createBlankEmbed(config) {
+  return {
+    color: config.defaultColor,
+    title: "Novo embed",
+    description: "Edite este texto usando os botoes abaixo."
+  };
 }
 
-function builderComponents(session) {
-  const saveLabel = session.target ? "Salvar alteracoes" : "Publicar";
+function createEmbedFromTemplate(config, template) {
+  const embed = {
+    color: config.defaultColor,
+    ...template.embed
+  };
 
+  if (embed.timestamp === "agora") {
+    embed.timestamp = new Date().toISOString();
+  }
+
+  return embed;
+}
+
+function getTemplateOptions() {
+  const seen = new Set();
+
+  return templates
+    .filter((template) => {
+      if (!template?.id || seen.has(template.id)) {
+        return false;
+      }
+
+      seen.add(template.id);
+      return true;
+    })
+    .slice(0, 24)
+    .map((template) => ({
+      label: String(template.label || template.id).slice(0, 100),
+      description: String(template.description || "Usar este template.").slice(0, 100),
+      value: String(template.id).slice(0, 100)
+    }));
+}
+
+function selectPayload(session) {
+  const embed = new EmbedBuilder()
+    .setColor(0x1fa1ff)
+    .setTitle("Criador de Embed")
+    .setDescription("Selecione uma opcao abaixo para comecar.");
+
+  return {
+    embeds: [embed],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(componentId("select", session.id))
+          .setPlaceholder("Escolha um template")
+          .addOptions(
+            {
+              label: "Criar Novo",
+              description: "Comecar com um embed limpo.",
+              value: "blank"
+            },
+            ...getTemplateOptions()
+          )
+      )
+    ]
+  };
+}
+
+function editorComponents(session) {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(componentId("content", session.id))
-        .setLabel("Conteudo")
+        .setCustomId(componentId("color", session.id))
+        .setLabel("Cor")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(componentId("title", session.id))
+        .setLabel("Titulo")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(componentId("description", session.id))
+        .setLabel("Descricao")
+        .setStyle(ButtonStyle.Primary)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(componentId("author", session.id))
+        .setLabel("Autor")
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
-        .setCustomId(componentId("media", session.id))
-        .setLabel("Midia")
+        .setCustomId(componentId("thumbnail", session.id))
+        .setLabel("Thumbnail")
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
-        .setCustomId(componentId("raw", session.id))
-        .setLabel("Editar JSON")
+        .setCustomId(componentId("image", session.id))
+        .setLabel("Imagem")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(componentId("footer", session.id))
+        .setLabel("Rodape")
         .setStyle(ButtonStyle.Secondary)
     ),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(componentId("export", session.id))
-        .setLabel("Exportar JSON")
+        .setCustomId(componentId("url", session.id))
+        .setLabel("Link")
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
-        .setCustomId(componentId("save", session.id))
-        .setLabel(saveLabel)
-        .setStyle(ButtonStyle.Primary),
+        .setCustomId(componentId("fields", session.id))
+        .setLabel("Campos")
+        .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
-        .setCustomId(componentId("close", session.id))
-        .setLabel("Encerrar")
-        .setStyle(ButtonStyle.Danger)
+        .setCustomId(componentId("timestamp", session.id))
+        .setLabel("Timestamp")
+        .setStyle(ButtonStyle.Secondary)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(componentId("cancel", session.id))
+        .setLabel("Cancelar")
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId(componentId("submit", session.id))
+        .setLabel("Enviar")
+        .setStyle(ButtonStyle.Success)
     )
   ];
 }
 
-function builderPayload(session, notice) {
-  const destination = session.target
-    ? `Editando a mensagem ${session.target.messageUrl}`
-    : `Destino: <#${session.channelId}>`;
-
+function editorPayload(session) {
   return {
-    content: [
-      "**Embed builder**",
-      destination,
-      notice || "Use os botoes abaixo para montar o embed. Somente voce consegue ver este painel."
-    ].join("\n"),
-    embeds: [new EmbedBuilder(session.embed)],
-    components: builderComponents(session)
+    embeds: [new EmbedBuilder(cleanEmbed(session.embed))],
+    components: editorComponents(session)
   };
 }
 
-function addTextInput(modal, { id, label, value, placeholder, style = TextInputStyle.Short, maxLength }) {
+function validateUrl(value, label) {
+  if (!value) {
+    return null;
+  }
+
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${label} precisa ser uma URL valida.`);
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`${label} precisa usar http ou https.`);
+  }
+
+  return value;
+}
+
+function parseFields(value) {
+  const lines = String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return lines.slice(0, 25).map((line) => {
+    const [name, fieldValue, inlineValue] = line.split("|").map((part) => part.trim());
+
+    if (!name || !fieldValue) {
+      throw new Error("Use o formato: Nome | Valor | true.");
+    }
+
+    return {
+      name: name.slice(0, 256),
+      value: fieldValue.slice(0, 1024),
+      inline: inlineValue?.toLowerCase() === "true"
+    };
+  });
+}
+
+function parseTimestamp(value) {
+  const normalized = String(value || "").trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.toLowerCase() === "agora") {
+    return new Date().toISOString();
+  }
+
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Timestamp invalido. Use 'agora' ou uma data ISO.");
+  }
+
+  return date.toISOString();
+}
+
+function createInput({ id, label, value, placeholder, style = TextInputStyle.Short, maxLength, required = false }) {
   const input = new TextInputBuilder()
     .setCustomId(id)
     .setLabel(label)
     .setStyle(style)
-    .setRequired(false);
+    .setRequired(required);
 
   if (value) input.setValue(String(value).slice(0, maxLength || 4000));
   if (placeholder) input.setPlaceholder(placeholder);
   if (maxLength) input.setMaxLength(maxLength);
 
-  modal.addComponents(new ActionRowBuilder().addComponents(input));
-  return modal;
+  return new ActionRowBuilder().addComponents(input);
 }
 
-function contentModal(session) {
+function editModal(action, session) {
   const modal = new ModalBuilder()
-    .setCustomId(componentId("contentform", session.id))
-    .setTitle("Editar conteudo");
+    .setCustomId(componentId(`${action}form`, session.id));
 
-  addTextInput(modal, { id: "title", label: "Titulo", value: session.embed.title, maxLength: 256 });
-  addTextInput(modal, {
-    id: "description",
-    label: "Descricao",
-    value: session.embed.description,
-    style: TextInputStyle.Paragraph,
-    maxLength: 4000
-  });
-  addTextInput(modal, {
-    id: "color",
-    label: "Cor hexadecimal",
-    value: `#${(session.embed.color || 0).toString(16).padStart(6, "0")}`,
-    placeholder: "#5865f2",
-    maxLength: 7
-  });
-  addTextInput(modal, { id: "url", label: "Link do titulo", value: session.embed.url, maxLength: 4000 });
-  addTextInput(modal, {
-    id: "timestamp",
-    label: "Data e hora",
-    value: session.embed.timestamp,
-    placeholder: "agora, uma data ISO, ou deixe vazio",
-    maxLength: 64
-  });
-  return modal;
-}
-
-function mediaModal(session) {
-  const modal = new ModalBuilder()
-    .setCustomId(componentId("mediaform", session.id))
-    .setTitle("Editar midia e identificacao");
-
-  addTextInput(modal, { id: "author", label: "Nome do autor", value: session.embed.author?.name, maxLength: 256 });
-  addTextInput(modal, { id: "authoricon", label: "URL do icone do autor", value: session.embed.author?.icon_url, maxLength: 4000 });
-  addTextInput(modal, { id: "footer", label: "Texto do rodape", value: session.embed.footer?.text, maxLength: 2048 });
-  addTextInput(modal, { id: "thumbnail", label: "URL da miniatura", value: session.embed.thumbnail?.url, maxLength: 4000 });
-  addTextInput(modal, { id: "image", label: "URL da imagem principal", value: session.embed.image?.url, maxLength: 4000 });
-  return modal;
-}
-
-function rawModal(session) {
-  const modal = new ModalBuilder()
-    .setCustomId(componentId("rawform", session.id))
-    .setTitle("Editar JSON do embed");
-  const json = JSON.stringify(session.embed, null, 2);
-
-  addTextInput(modal, {
-    id: "json",
-    label: "JSON",
-    value: json.length <= 4000 ? json : "",
-    placeholder: json.length > 4000 ? "O JSON atual e grande. Importe um arquivo pelo comando." : undefined,
-    style: TextInputStyle.Paragraph,
-    maxLength: 4000
-  });
-  return modal;
-}
-
-function optionalField(interaction, id) {
-  const value = interaction.fields.getTextInputValue(id).trim();
-  return value || undefined;
-}
-
-function updateContentFromModal(interaction, session) {
-  const next = { ...session.embed };
-  const title = optionalField(interaction, "title");
-  const description = optionalField(interaction, "description");
-  const colorInput = optionalField(interaction, "color");
-  const url = optionalField(interaction, "url");
-  const timestampInput = optionalField(interaction, "timestamp");
-
-  if (title) next.title = title; else delete next.title;
-  if (description) next.description = description; else delete next.description;
-  if (url) next.url = url; else delete next.url;
-
-  if (colorInput) {
-    if (!/^#[0-9a-f]{6}$/i.test(colorInput)) throw new Error("Use uma cor no formato #5865f2.");
-    next.color = parseColor(colorInput);
-  } else {
-    delete next.color;
+  if (action === "color") {
+    return modal
+      .setTitle("Editar cor")
+      .addComponents(createInput({
+        id: "color",
+        label: "Cor hexadecimal",
+        value: `#${(session.embed.color || 0).toString(16).padStart(6, "0")}`,
+        placeholder: "#1fa1ff",
+        maxLength: 7,
+        required: true
+      }));
   }
 
-  if (timestampInput?.toLowerCase() === "agora") {
-    next.timestamp = new Date().toISOString();
-  } else if (timestampInput) {
-    const date = new Date(timestampInput);
-    if (Number.isNaN(date.getTime())) throw new Error("A data informada nao e valida.");
-    next.timestamp = date.toISOString();
-  } else {
-    delete next.timestamp;
+  if (action === "title") {
+    return modal
+      .setTitle("Editar titulo")
+      .addComponents(createInput({
+        id: "title",
+        label: "Titulo",
+        value: session.embed.title,
+        maxLength: 256
+      }));
   }
 
-  session.embed = new EmbedBuilder(next).toJSON();
-}
+  if (action === "url") {
+    return modal
+      .setTitle("Editar link do titulo")
+      .addComponents(createInput({
+        id: "url",
+        label: "URL do titulo",
+        value: session.embed.url,
+        placeholder: "https://...",
+        maxLength: 4000
+      }));
+  }
 
-function updateMediaFromModal(interaction, session) {
-  const next = { ...session.embed };
-  const author = optionalField(interaction, "author");
-  const authorIcon = optionalField(interaction, "authoricon");
-  const footer = optionalField(interaction, "footer");
-  const thumbnail = optionalField(interaction, "thumbnail");
-  const image = optionalField(interaction, "image");
+  if (action === "description") {
+    return modal
+      .setTitle("Editar descricao")
+      .addComponents(createInput({
+        id: "description",
+        label: "Descricao",
+        value: session.embed.description,
+        style: TextInputStyle.Paragraph,
+        maxLength: 4000
+      }));
+  }
 
-  if (author) next.author = { name: author, ...(authorIcon ? { icon_url: authorIcon } : {}) };
-  else delete next.author;
-  if (footer) next.footer = { text: footer }; else delete next.footer;
-  if (thumbnail) next.thumbnail = { url: thumbnail }; else delete next.thumbnail;
-  if (image) next.image = { url: image }; else delete next.image;
+  if (action === "author") {
+    return modal
+      .setTitle("Editar autor")
+      .addComponents(
+        createInput({
+          id: "author",
+          label: "Nome do autor",
+          value: session.embed.author?.name,
+          maxLength: 256
+        }),
+        createInput({
+          id: "authoricon",
+          label: "URL do icone do autor",
+          value: session.embed.author?.icon_url,
+          placeholder: "https://...",
+          maxLength: 4000
+        }),
+        createInput({
+          id: "authorurl",
+          label: "URL do autor",
+          value: session.embed.author?.url,
+          placeholder: "https://...",
+          maxLength: 4000
+        })
+      );
+  }
 
-  session.embed = new EmbedBuilder(next).toJSON();
-}
+  if (action === "thumbnail") {
+    return modal
+      .setTitle("Editar thumbnail")
+      .addComponents(createInput({
+        id: "thumbnail",
+        label: "URL da thumbnail",
+        value: session.embed.thumbnail?.url,
+        placeholder: "https://...",
+        maxLength: 4000
+      }));
+  }
 
-function jsonAttachment(embed, filename = "embed.json") {
-  const buffer = Buffer.from(`${JSON.stringify(embed, null, 2)}\n`, "utf8");
-  return new AttachmentBuilder(buffer, { name: filename });
+  if (action === "image") {
+    return modal
+      .setTitle("Editar imagem")
+      .addComponents(createInput({
+        id: "image",
+        label: "URL da imagem",
+        value: session.embed.image?.url,
+        placeholder: "https://...",
+        maxLength: 4000
+      }));
+  }
+
+  if (action === "footer") {
+    return modal
+      .setTitle("Editar rodape")
+      .addComponents(
+        createInput({
+          id: "footer",
+          label: "Rodape",
+          value: session.embed.footer?.text,
+          maxLength: 2048
+        }),
+        createInput({
+          id: "footericon",
+          label: "URL do icone do rodape",
+          value: session.embed.footer?.icon_url,
+          placeholder: "https://...",
+          maxLength: 4000
+        })
+      );
+  }
+
+  if (action === "fields") {
+    const fields = (session.embed.fields || [])
+      .map((field) => `${field.name} | ${field.value} | ${field.inline ? "true" : "false"}`)
+      .join("\n");
+
+    return modal
+      .setTitle("Editar campos")
+      .addComponents(createInput({
+        id: "fields",
+        label: "Campos",
+        value: fields,
+        placeholder: "Nome | Valor | true\nOutro nome | Outro valor | false",
+        style: TextInputStyle.Paragraph,
+        maxLength: 4000
+      }));
+  }
+
+  return modal
+    .setTitle("Editar timestamp")
+    .addComponents(createInput({
+      id: "timestamp",
+      label: "Timestamp",
+      value: session.embed.timestamp,
+      placeholder: "agora, 2026-08-11T14:00:00.000Z ou vazio",
+      maxLength: 64
+    }));
 }
 
 async function replyError(interaction, content) {
@@ -522,224 +504,122 @@ async function ensureCommandAccess(interaction) {
     return false;
   }
 
+  if (!interaction.channel?.isTextBased() || typeof interaction.channel.send !== "function") {
+    await replyError(interaction, "Use este comando em um canal onde o bot possa enviar mensagens.");
+    return false;
+  }
+
   return true;
 }
 
-async function resolveDestination(interaction) {
-  const channel = interaction.options.getChannel("canal") || interaction.channel;
-
-  if (!channel?.isTextBased() || typeof channel.send !== "function") {
-    await replyError(interaction, "Escolha um canal onde o bot possa enviar mensagens.");
-    return null;
-  }
-
-  if (!channel.permissionsFor(interaction.member)?.has(PermissionFlagsBits.ManageMessages)) {
-    await replyError(interaction, "Voce precisa de Gerenciar Mensagens no canal de destino.");
-    return null;
-  }
-
-  return channel;
-}
-
-async function openBuilder(interaction, config, embed) {
-  const destination = await resolveDestination(interaction);
-  if (!destination) return;
-
-  const session = createSession(interaction, config, embed, { channelId: destination.id });
-  await interaction.reply({ ...builderPayload(session), flags: MessageFlags.Ephemeral });
-}
-
-async function handleCreate(interaction, config) {
-  await openBuilder(interaction, config, {
-    description: "Novo embed",
-    color: config.defaultColor
-  });
-}
-
-async function handleImport(interaction, config) {
-  const attachment = interaction.options.getAttachment("arquivo", true);
-
-  if (attachment.size > 1024 * 1024) {
-    await replyError(interaction, "O arquivo JSON deve ter no maximo 1 MB.");
-    return;
-  }
-
-  const response = await fetch(attachment.url);
-  if (!response.ok) throw new Error(`Falha ao baixar JSON: HTTP ${response.status}`);
-
-  let parsed;
-  try {
-    parsed = JSON.parse(await response.text());
-  } catch {
-    await replyError(interaction, "O arquivo enviado nao contem um JSON valido.");
-    return;
-  }
-
-  await openBuilder(interaction, config, extractEmbedData(parsed));
-}
-
-async function handleEdit(interaction, config) {
-  const message = await fetchMessage(interaction, interaction.options.getString("mensagem", true));
-  const index = interaction.options.getInteger("indice") || 1;
-
-  if (!message) {
-    await replyError(interaction, "Nao encontrei essa mensagem. Use o link completo ou o ID de uma mensagem no canal atual.");
-    return;
-  }
-
-  if (message.author.id !== interaction.client.user.id) {
-    await replyError(interaction, "So posso editar mensagens enviadas por este bot.");
-    return;
-  }
-
-  if (!message.channel.permissionsFor(interaction.member)?.has(PermissionFlagsBits.ManageMessages)) {
-    await replyError(interaction, "Voce precisa de Gerenciar Mensagens no canal dessa mensagem.");
-    return;
-  }
-
-  const selectedEmbed = message.embeds[index - 1];
-  if (!selectedEmbed) {
-    await replyError(interaction, `Essa mensagem nao possui um embed no indice ${index}.`);
-    return;
-  }
-
-  const session = createSession(interaction, config, selectedEmbed.toJSON(), {
-    target: {
-      channelId: message.channelId,
-      messageId: message.id,
-      messageUrl: message.url,
-      index: index - 1
-    }
-  });
-
-  await interaction.reply({ ...builderPayload(session), flags: MessageFlags.Ephemeral });
-}
-
-async function handleJsonCommand(interaction) {
-  const message = await fetchMessage(interaction, interaction.options.getString("mensagem", true));
-  const index = interaction.options.getInteger("indice") || 1;
-
-  if (!message) {
-    await replyError(interaction, "Nao encontrei essa mensagem. Use o link completo ou o ID de uma mensagem no canal atual.");
-    return;
-  }
-
-  const selectedEmbed = message.embeds[index - 1];
-  if (!selectedEmbed) {
-    await replyError(interaction, `Essa mensagem nao possui um embed no indice ${index}.`);
-    return;
-  }
-
-  const json = JSON.stringify(selectedEmbed.toJSON(), null, 2);
-  await interaction.reply({
-    content: json.length <= 1800 ? `\`\`\`json\n${json}\n\`\`\`` : "JSON exportado no arquivo abaixo.",
-    files: [jsonAttachment(selectedEmbed.toJSON())],
-    flags: MessageFlags.Ephemeral
-  });
-}
-
 async function handleCommand(interaction, config) {
-  if (!await ensureCommandAccess(interaction)) return;
-
-  const subcommand = interaction.options.getSubcommand();
-
-  if (subcommand === "criar") return handleCreate(interaction, config);
-  if (subcommand === "editar") return handleEdit(interaction, config);
-  if (subcommand === "importar") return handleImport(interaction, config);
-  if (subcommand === "json") return handleJsonCommand(interaction);
-}
-
-async function handleSave(interaction, session) {
-  validateEmbed(session.embed);
-
-  if (session.target) {
-    const channel = interaction.guild.channels.cache.get(session.target.channelId)
-      || await interaction.guild.channels.fetch(session.target.channelId).catch(() => null);
-    const message = channel?.isTextBased() && channel.messages
-      ? await channel.messages.fetch(session.target.messageId).catch(() => null)
-      : null;
-
-    if (!message || message.author.id !== interaction.client.user.id) {
-      throw new Error("A mensagem original nao existe mais ou nao pertence ao bot.");
-    }
-
-    const embeds = message.embeds.map((embed) => embed.toJSON());
-    embeds[session.target.index] = session.embed;
-    await message.edit({ embeds });
-    await interaction.update(builderPayload(session, `Alteracoes salvas em ${message.url}.`));
+  if (!await ensureCommandAccess(interaction)) {
     return;
   }
 
-  const channel = interaction.guild.channels.cache.get(session.channelId)
-    || await interaction.guild.channels.fetch(session.channelId).catch(() => null);
+  const session = createSession(interaction, config);
+  await interaction.reply(selectPayload(session));
 
-  if (!channel?.isTextBased() || typeof channel.send !== "function") {
-    throw new Error("O canal de destino nao esta mais disponivel.");
-  }
-
-  const message = await channel.send({ embeds: [new EmbedBuilder(session.embed)] });
-  await interaction.update(builderPayload(session, `Embed publicado em ${message.url}.`));
+  const message = await interaction.fetchReply();
+  session.messageId = message.id;
 }
 
-async function handleButton(interaction, parsed) {
-  const result = getSession(interaction, parsed.sessionId);
-  if (result.error) return replyError(interaction, result.error);
+async function handleSelect(interaction, config, session) {
+  const choice = interaction.values[0];
+  const template = templates.find((item) => item.id === choice);
 
-  const { session } = result;
-  session.expiresAt = Date.now() + session.ttlMs;
+  session.embed = template
+    ? createEmbedFromTemplate(config, template)
+    : createBlankEmbed(config);
 
-  if (parsed.action === "content") return interaction.showModal(contentModal(session));
-  if (parsed.action === "media") return interaction.showModal(mediaModal(session));
-  if (parsed.action === "raw") return interaction.showModal(rawModal(session));
+  await interaction.update(editorPayload(session));
+}
 
-  if (parsed.action === "export") {
-    await interaction.reply({
-      content: "JSON exportado. Use este arquivo em `/embed importar` quando quiser reutiliza-lo.",
-      files: [jsonAttachment(session.embed)],
-      flags: MessageFlags.Ephemeral
-    });
+async function handleButton(interaction, session, action) {
+  if (!session.embed && action !== "cancel") {
+    await replyError(interaction, "Selecione um template antes de editar.");
     return;
   }
 
-  if (parsed.action === "save") return handleSave(interaction, session);
+  if (["author", "color", "title", "url", "description", "thumbnail", "image", "footer", "fields", "timestamp"].includes(action)) {
+    await interaction.showModal(editModal(action, session));
+    return;
+  }
 
-  if (parsed.action === "close") {
+  if (action === "cancel") {
+    sessions.delete(session.id);
+    await interaction.deferUpdate();
+    await interaction.message.delete().catch(() => {});
+    return;
+  }
+
+  if (action === "submit") {
     sessions.delete(session.id);
     await interaction.update({
-      content: "Embed builder encerrado.",
-      embeds: [],
+      embeds: [new EmbedBuilder(cleanEmbed(session.embed))],
       components: []
     });
   }
 }
 
-async function handleModal(interaction, parsed) {
-  const result = getSession(interaction, parsed.sessionId);
-  if (result.error) return replyError(interaction, result.error);
-
-  const { session } = result;
-  const previousEmbed = session.embed;
+async function handleModal(interaction, session, action) {
+  const previousEmbed = { ...session.embed };
 
   try {
-    if (parsed.action === "contentform") {
-      updateContentFromModal(interaction, session);
-    } else if (parsed.action === "mediaform") {
-      updateMediaFromModal(interaction, session);
-    } else if (parsed.action === "rawform") {
-      let parsedJson;
-      try {
-        parsedJson = JSON.parse(interaction.fields.getTextInputValue("json"));
-      } catch {
-        throw new Error("O texto informado nao e um JSON valido.");
+    if (action === "colorform") {
+      const value = interaction.fields.getTextInputValue("color").trim();
+      if (!/^#[0-9a-f]{6}$/i.test(value)) throw new Error("Use uma cor no formato #1fa1ff.");
+      session.embed.color = parseColor(value);
+    } else if (action === "titleform") {
+      const value = interaction.fields.getTextInputValue("title").trim();
+      if (value) session.embed.title = value; else delete session.embed.title;
+    } else if (action === "urlform") {
+      const value = validateUrl(interaction.fields.getTextInputValue("url").trim(), "O link do titulo");
+      if (value) session.embed.url = value; else delete session.embed.url;
+    } else if (action === "descriptionform") {
+      const value = interaction.fields.getTextInputValue("description").trim();
+      if (value) session.embed.description = value; else delete session.embed.description;
+    } else if (action === "authorform") {
+      const name = interaction.fields.getTextInputValue("author").trim();
+      const iconUrl = validateUrl(interaction.fields.getTextInputValue("authoricon").trim(), "O icone do autor");
+      const authorUrl = validateUrl(interaction.fields.getTextInputValue("authorurl").trim(), "O link do autor");
+      if (name) {
+        session.embed.author = {
+          name,
+          ...(iconUrl ? { icon_url: iconUrl } : {}),
+          ...(authorUrl ? { url: authorUrl } : {})
+        };
+      } else {
+        delete session.embed.author;
       }
-      session.embed = extractEmbedData(parsedJson);
+    } else if (action === "thumbnailform") {
+      const value = validateUrl(interaction.fields.getTextInputValue("thumbnail").trim(), "A thumbnail");
+      if (value) session.embed.thumbnail = { url: value }; else delete session.embed.thumbnail;
+    } else if (action === "imageform") {
+      const value = validateUrl(interaction.fields.getTextInputValue("image").trim(), "A imagem");
+      if (value) session.embed.image = { url: value }; else delete session.embed.image;
+    } else if (action === "footerform") {
+      const text = interaction.fields.getTextInputValue("footer").trim();
+      const iconUrl = validateUrl(interaction.fields.getTextInputValue("footericon").trim(), "O icone do rodape");
+      if (text) {
+        session.embed.footer = {
+          text,
+          ...(iconUrl ? { icon_url: iconUrl } : {})
+        };
+      } else {
+        delete session.embed.footer;
+      }
+    } else if (action === "fieldsform") {
+      const fields = parseFields(interaction.fields.getTextInputValue("fields"));
+      if (fields.length) session.embed.fields = fields; else delete session.embed.fields;
+    } else if (action === "timestampform") {
+      const timestamp = parseTimestamp(interaction.fields.getTextInputValue("timestamp"));
+      if (timestamp) session.embed.timestamp = timestamp; else delete session.embed.timestamp;
     } else {
       return;
     }
 
-    validateEmbed(session.embed);
-    session.expiresAt = Date.now() + session.ttlMs;
-    await interaction.update(builderPayload(session, "Previa atualizada."));
+    await interaction.update(editorPayload(session));
   } catch (error) {
     session.embed = previousEmbed;
     await replyError(interaction, error.message);
@@ -767,10 +647,24 @@ async function register({ client, config }) {
       const parsed = parseComponentId(interaction.customId || "");
       if (!parsed) return;
 
+      const result = getSession(interaction, parsed.sessionId);
+      if (result.error) {
+        await replyError(interaction, result.error);
+        return;
+      }
+
+      if (interaction.isStringSelectMenu() && parsed.action === "select") {
+        await handleSelect(interaction, resolvedConfig, result.session);
+        return;
+      }
+
       if (interaction.isButton()) {
-        await handleButton(interaction, parsed);
-      } else if (interaction.isModalSubmit()) {
-        await handleModal(interaction, parsed);
+        await handleButton(interaction, result.session, parsed.action);
+        return;
+      }
+
+      if (interaction.isModalSubmit()) {
+        await handleModal(interaction, result.session, parsed.action);
       }
     } catch (error) {
       console.error("[embed] Falha ao processar interacao.", error);
