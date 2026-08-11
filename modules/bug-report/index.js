@@ -77,10 +77,11 @@ function buildBugEmbed(interaction, config, cause) {
   return new EmbedBuilder()
     .setColor(config.accentColor)
     .setTitle("🌊 BUG REPORTADO")
-    .setDescription(`${truncate(cause, 1000)}\n\n${REPORT_HINT}`)
+    .setDescription(truncate(cause, 1000))
     .addFields(
       { name: "Enviado por", value: `${interaction.user}`, inline: true },
-      { name: "Data", value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true }
+      { name: "Data", value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
+      { name: "\u200b", value: REPORT_HINT }
     );
 }
 
