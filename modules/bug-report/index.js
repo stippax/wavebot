@@ -29,7 +29,7 @@ function resolveConfig(config) {
     accentColor: parseHexColor(config.accentColor, 0x1fa1ff),
     footerText: typeof config.footerText === "string" && config.footerText.trim()
       ? config.footerText.trim().slice(0, 2048)
-      : "Para reportar outro problema, use /bug na barra de texto."
+      : "Para reportar outro problema, use **/bug** na barra de texto."
   };
 }
 
@@ -78,7 +78,7 @@ async function resolveLogChannel(interaction, config) {
 function buildBugEmbed(interaction, config, cause) {
   return new EmbedBuilder()
     .setColor(config.accentColor)
-    .setTitle("Bug reportado")
+    .setTitle("🌊 BUG REPORTADO")
     .setDescription(truncate(cause, 1000))
     .addFields(
       { name: "Enviado por", value: `${interaction.user}`, inline: true },
