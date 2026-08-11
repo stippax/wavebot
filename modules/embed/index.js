@@ -1,8 +1,11 @@
 const crypto = require("node:crypto");
 const {
   ActionRowBuilder,
+  ApplicationCommandType,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ContextMenuCommandBuilder,
   EmbedBuilder,
   Events,
   MessageFlags,
@@ -16,6 +19,8 @@ const {
 const templates = require("./templates");
 
 const COMMAND_NAME = "embed";
+const EDIT_CONTEXT_NAME = "Editar Embed";
+const COPY_CONTEXT_NAME = "Copiar JSON";
 const COMPONENT_PREFIX = "embed-builder";
 const sessions = new Map();
 
@@ -57,13 +62,24 @@ function buildCommand() {
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages);
 }
 
+function buildContextCommand(name) {
+  return new ContextMenuCommandBuilder()
+    .setName(name)
+    .setType(ApplicationCommandType.Message)
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages);
+}
+
 function getCommands(config) {
   const resolvedConfig = resolveConfig(config);
 
-  return [{
-    command: buildCommand().toJSON(),
+  return [
+    buildCommand().toJSON(),
+    buildContextCommand(EDIT_CONTEXT_NAME).toJSON(),
+    buildContextCommand(COPY_CONTEXT_NAME).toJSON()
+  ].map((command) => ({
+    command,
     guildId: resolvedConfig.guildId
-  }];
+  }));
 }
 
 function componentId(action, sessionId) {
@@ -75,14 +91,15 @@ function parseComponentId(customId) {
   return match ? { action: match[1], sessionId: match[2] } : null;
 }
 
-function createSession(interaction, config) {
+function createSession(interaction, config, options = {}) {
   const id = crypto.randomBytes(8).toString("hex");
   const session = {
     id,
     ownerId: interaction.user.id,
     guildId: interaction.guildId,
     messageId: null,
-    embed: null,
+    embed: options.embed || null,
+    target: options.target || null,
     ttlMs: config.sessionTtlMs,
     expiresAt: Date.now() + config.sessionTtlMs
   };
@@ -122,6 +139,29 @@ function cleanEmbed(data) {
   if (!Number.isInteger(embed.color)) delete embed.color;
 
   return embed;
+}
+
+function extractEmbedData(value) {
+  let candidate = value;
+
+  if (Array.isArray(candidate)) {
+    [candidate] = candidate;
+  } else if (candidate?.embeds && Array.isArray(candidate.embeds)) {
+    [candidate] = candidate.embeds;
+  } else if (candidate?.embed && typeof candidate.embed === "object") {
+    candidate = candidate.embed;
+  }
+
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    throw new Error("O JSON precisa conter um objeto de embed.");
+  }
+
+  return cleanEmbed(new EmbedBuilder(candidate).toJSON());
+}
+
+function jsonAttachment(embed, filename = "embed.json") {
+  const buffer = Buffer.from(`${JSON.stringify(cleanEmbed(embed), null, 2)}\n`, "utf8");
+  return new AttachmentBuilder(buffer, { name: filename });
 }
 
 function createBlankEmbed(config) {
@@ -245,8 +285,12 @@ function editorComponents(session) {
         .setLabel("Cancelar")
         .setStyle(ButtonStyle.Danger),
       new ButtonBuilder()
+        .setCustomId(componentId("import", session.id))
+        .setLabel("Importar")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
         .setCustomId(componentId("submit", session.id))
-        .setLabel("Enviar")
+        .setLabel(session.target ? "Salvar" : "Enviar")
         .setStyle(ButtonStyle.Success)
     )
   ];
@@ -472,6 +516,19 @@ function editModal(action, session) {
       }));
   }
 
+  if (action === "import") {
+    return modal
+      .setTitle("Importar JSON")
+      .addComponents(createInput({
+        id: "json",
+        label: "JSON do embed",
+        placeholder: "{\"title\":\"Meu embed\",\"description\":\"Texto\"}",
+        style: TextInputStyle.Paragraph,
+        maxLength: 4000,
+        required: true
+      }));
+  }
+
   return modal
     .setTitle("Editar timestamp")
     .addComponents(createInput({
@@ -518,10 +575,66 @@ async function handleCommand(interaction, config) {
   }
 
   const session = createSession(interaction, config);
-  await interaction.reply(selectPayload(session));
+  await interaction.deferReply({
+    flags: MessageFlags.Ephemeral
+  });
 
-  const message = await interaction.fetchReply();
+  const message = await interaction.channel.send(selectPayload(session));
   session.messageId = message.id;
+  await interaction.deleteReply().catch(() => {});
+}
+
+async function handleEditContext(interaction, config) {
+  if (!await ensureCommandAccess(interaction)) {
+    return;
+  }
+
+  const targetMessage = interaction.targetMessage;
+  const sourceEmbed = targetMessage?.embeds?.[0];
+
+  if (!sourceEmbed) {
+    await replyError(interaction, "Essa mensagem nao possui embed para editar.");
+    return;
+  }
+
+  if (targetMessage.author.id !== interaction.client.user.id) {
+    await replyError(interaction, "So posso editar embeds enviados por este bot.");
+    return;
+  }
+
+  const session = createSession(interaction, config, {
+    embed: sourceEmbed.toJSON(),
+    target: {
+      channelId: targetMessage.channelId,
+      messageId: targetMessage.id
+    }
+  });
+
+  await interaction.reply({
+    ...editorPayload(session),
+    flags: MessageFlags.Ephemeral
+  });
+
+  const replyMessage = await interaction.fetchReply().catch(() => null);
+  session.messageId = replyMessage?.id || null;
+}
+
+async function handleCopyContext(interaction) {
+  const sourceEmbed = interaction.targetMessage?.embeds?.[0];
+
+  if (!sourceEmbed) {
+    await replyError(interaction, "Essa mensagem nao possui embed para copiar.");
+    return;
+  }
+
+  const embed = sourceEmbed.toJSON();
+  const json = JSON.stringify(cleanEmbed(embed), null, 2);
+
+  await interaction.reply({
+    content: json.length <= 1800 ? `\`\`\`json\n${json}\n\`\`\`` : "JSON exportado no arquivo abaixo.",
+    files: [jsonAttachment(embed)],
+    flags: MessageFlags.Ephemeral
+  });
 }
 
 async function handleSelect(interaction, config, session) {
@@ -541,13 +654,22 @@ async function handleButton(interaction, session, action) {
     return;
   }
 
-  if (["author", "color", "title", "url", "description", "thumbnail", "image", "footer", "fields", "timestamp"].includes(action)) {
+  if (["author", "color", "title", "url", "description", "thumbnail", "image", "footer", "fields", "timestamp", "import"].includes(action)) {
     await interaction.showModal(editModal(action, session));
     return;
   }
 
   if (action === "cancel") {
     sessions.delete(session.id);
+    if (session.target) {
+      await interaction.update({
+        content: "Editor cancelado.",
+        embeds: [],
+        components: []
+      });
+      return;
+    }
+
     await interaction.deferUpdate();
     await interaction.message.delete().catch(() => {});
     return;
@@ -555,10 +677,30 @@ async function handleButton(interaction, session, action) {
 
   if (action === "submit") {
     sessions.delete(session.id);
-    await interaction.update({
-      embeds: [new EmbedBuilder(cleanEmbed(session.embed))],
-      components: []
+
+    if (session.target) {
+      const targetMessage = await interaction.channel.messages.fetch(session.target.messageId).catch(() => null);
+
+      if (!targetMessage || targetMessage.author.id !== interaction.client.user.id) {
+        throw new Error("A mensagem original nao existe mais ou nao pertence ao bot.");
+      }
+
+      await targetMessage.edit({
+        embeds: [new EmbedBuilder(cleanEmbed(session.embed))]
+      });
+      await interaction.update({
+        content: "Embed editado.",
+        embeds: [],
+        components: []
+      });
+      return;
+    }
+
+    await interaction.deferUpdate();
+    await interaction.channel.send({
+      embeds: [new EmbedBuilder(cleanEmbed(session.embed))]
     });
+    await interaction.message.delete().catch(() => {});
   }
 }
 
@@ -615,6 +757,15 @@ async function handleModal(interaction, session, action) {
     } else if (action === "timestampform") {
       const timestamp = parseTimestamp(interaction.fields.getTextInputValue("timestamp"));
       if (timestamp) session.embed.timestamp = timestamp; else delete session.embed.timestamp;
+    } else if (action === "importform") {
+      let parsedJson;
+      try {
+        parsedJson = JSON.parse(interaction.fields.getTextInputValue("json"));
+      } catch {
+        throw new Error("O texto informado nao e um JSON valido.");
+      }
+
+      session.embed = extractEmbedData(parsedJson);
     } else {
       return;
     }
@@ -642,6 +793,18 @@ async function register({ client, config }) {
       if (interaction.isChatInputCommand() && interaction.commandName === COMMAND_NAME) {
         await handleCommand(interaction, resolvedConfig);
         return;
+      }
+
+      if (interaction.isMessageContextMenuCommand()) {
+        if (interaction.commandName === EDIT_CONTEXT_NAME) {
+          await handleEditContext(interaction, resolvedConfig);
+          return;
+        }
+
+        if (interaction.commandName === COPY_CONTEXT_NAME) {
+          await handleCopyContext(interaction);
+          return;
+        }
       }
 
       const parsed = parseComponentId(interaction.customId || "");
